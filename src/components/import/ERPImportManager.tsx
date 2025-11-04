@@ -124,15 +124,65 @@ export function ERPImportManager({ onClose, onImportComplete }: ERPImportManager
         const { data: userData } = await supabase.auth.getUser();
         if (!userData.user) throw new Error('User not authenticated');
 
+        // Check for existing products in the database to prevent duplicates
+        const productNames = productsToInsert.map(p => p.name.trim().toLowerCase());
+        const { data: existingProducts, error: checkError } = await supabase
+          .from('products')
+          .select('id, name, sku, company_id')
+          .eq('company_id', selectedCompany.company_name)
+          .eq('user_id', userData.user.id);
+
+        if (checkError) {
+          console.error('Error checking existing products:', checkError);
+          // Continue with import but log the error
+        }
+
+        // Create sets of existing product names and SKUs for quick lookup
+        const existingNames = new Set(
+          (existingProducts || []).map(p => p.name.trim().toLowerCase())
+        );
+        const existingSKUs = new Set(
+          (existingProducts || []).filter(p => p.sku).map(p => p.sku!.trim().toLowerCase())
+        );
+
         // Remove duplicates within the import batch (keep first occurrence)
         const seenSKUs = new Set<string>();
-        const uniqueProducts = productsToInsert.filter(product => {
-          if (product.sku) {
-            if (seenSKUs.has(product.sku)) {
-              return false; // Skip duplicate
-            }
-            seenSKUs.add(product.sku);
+        const seenNames = new Set<string>();
+        const duplicateInBatch: string[] = [];
+        const duplicateInDatabase: string[] = [];
+        
+        const uniqueProducts = productsToInsert.filter((product, index) => {
+          const productNameLower = product.name.trim().toLowerCase();
+          const productSKU = product.sku?.trim().toLowerCase();
+          
+          // Check for duplicates within the batch
+          if (seenNames.has(productNameLower)) {
+            duplicateInBatch.push(`Row ${index + 2}: "${product.name}" (duplicate in import file)`);
+            return false; // Skip duplicate in batch
           }
+          
+          if (productSKU && seenSKUs.has(productSKU)) {
+            duplicateInBatch.push(`Row ${index + 2}: SKU "${product.sku}" (duplicate in import file)`);
+            return false; // Skip duplicate SKU in batch
+          }
+          
+          // Check for duplicates in database
+          if (existingNames.has(productNameLower)) {
+            duplicateInDatabase.push(`"${product.name}"`);
+            return false; // Skip duplicate in database
+          }
+          
+          if (productSKU && existingSKUs.has(productSKU)) {
+            duplicateInDatabase.push(`SKU "${product.sku}"`);
+            return false; // Skip duplicate SKU in database
+          }
+          
+          // Add to seen sets
+          seenNames.add(productNameLower);
+          if (productSKU) {
+            seenSKUs.add(productSKU);
+          }
+          
           return true;
         });
 
@@ -141,6 +191,23 @@ export function ERPImportManager({ onClose, onImportComplete }: ERPImportManager
           user_id: userData.user.id,
           company_id: selectedCompany.company_name
         }));
+
+        // Show warnings for duplicates
+        if (duplicateInBatch.length > 0 || duplicateInDatabase.length > 0) {
+          const duplicateMessages: string[] = [];
+          if (duplicateInBatch.length > 0) {
+            duplicateMessages.push(`${duplicateInBatch.length} duplicate(s) in import file skipped`);
+          }
+          if (duplicateInDatabase.length > 0) {
+            duplicateMessages.push(`${duplicateInDatabase.length} existing product(s) in database skipped: ${duplicateInDatabase.slice(0, 5).join(', ')}${duplicateInDatabase.length > 5 ? ` and ${duplicateInDatabase.length - 5} more` : ''}`);
+          }
+          
+          toast({
+            title: "Duplicates Detected",
+            description: duplicateMessages.join('. '),
+            variant: "default"
+          });
+        }
 
         // Separate products with and without SKU
         const productsWithSKU = productsWithUser.filter(p => p.sku);
@@ -185,7 +252,9 @@ export function ERPImportManager({ onClose, onImportComplete }: ERPImportManager
         const skippedCount = products.length - uniqueProducts.length;
         let message = `Successfully imported ${processedCount} products`;
         if (skippedCount > 0) {
-          message += `. ${skippedCount} duplicate SKU(s) skipped from import file.`;
+          const duplicateInFileCount = duplicateInBatch.length;
+          const duplicateInDbCount = duplicateInDatabase.length;
+          message += `. ${skippedCount} duplicate(s) skipped (${duplicateInFileCount} in file, ${duplicateInDbCount} already in database).`;
         }
 
         toast({
@@ -199,8 +268,78 @@ export function ERPImportManager({ onClose, onImportComplete }: ERPImportManager
         const { data: userData } = await supabase.auth.getUser();
         if (!userData.user) throw new Error('User not authenticated');
 
+        // Check for existing suppliers in the database to prevent duplicates
+        const { data: existingSuppliers, error: checkError } = await supabase
+          .from('suppliers')
+          .select('id, company_name')
+          .eq('company_id', selectedCompany.company_name)
+          .eq('user_id', userData.user.id);
+
+        if (checkError) {
+          console.error('Error checking existing suppliers:', checkError);
+        }
+
+        // Create set of existing supplier names for quick lookup
+        const existingNames = new Set(
+          (existingSuppliers || []).map(s => s.company_name.trim().toLowerCase())
+        );
+
+        // Remove duplicates within the import batch and against database
+        const seenNames = new Set<string>();
+        const duplicateInBatch: string[] = [];
+        const duplicateInDatabase: string[] = [];
+        
+        const uniqueSuppliers = suppliers.filter((supplier, index) => {
+          const supplierNameLower = supplier.name.trim().toLowerCase();
+          
+          // Check for duplicates within the batch
+          if (seenNames.has(supplierNameLower)) {
+            duplicateInBatch.push(`Row ${index + 2}: "${supplier.name}" (duplicate in import file)`);
+            return false;
+          }
+          
+          // Check for duplicates in database
+          if (existingNames.has(supplierNameLower)) {
+            duplicateInDatabase.push(`"${supplier.name}"`);
+            return false;
+          }
+          
+          seenNames.add(supplierNameLower);
+          return true;
+        });
+
+        // Show warnings for duplicates
+        if (duplicateInBatch.length > 0 || duplicateInDatabase.length > 0) {
+          const duplicateMessages: string[] = [];
+          if (duplicateInBatch.length > 0) {
+            duplicateMessages.push(`${duplicateInBatch.length} duplicate(s) in import file skipped`);
+          }
+          if (duplicateInDatabase.length > 0) {
+            duplicateMessages.push(`${duplicateInDatabase.length} existing supplier(s) in database skipped: ${duplicateInDatabase.slice(0, 5).join(', ')}${duplicateInDatabase.length > 5 ? ` and ${duplicateInDatabase.length - 5} more` : ''}`);
+          }
+          
+          toast({
+            title: "Duplicates Detected",
+            description: duplicateMessages.join('. '),
+            variant: "default"
+          });
+        }
+
+        if (uniqueSuppliers.length === 0) {
+          toast({
+            title: "No Suppliers to Import",
+            description: "All suppliers in the file are duplicates or already exist in the database.",
+            variant: "default"
+          });
+          setCurrentStep('complete');
+          if (onImportComplete) {
+            onImportComplete();
+          }
+          return;
+        }
+
         // First, insert into business_entities
-        const entitiesToInsert = suppliers.map(supplier => ({
+        const entitiesToInsert = uniqueSuppliers.map(supplier => ({
           name: supplier.name,
           entity_type: 'supplier',
           contact_person: supplier.contactPerson || null,
@@ -216,10 +355,13 @@ export function ERPImportManager({ onClose, onImportComplete }: ERPImportManager
           .from('business_entities')
           .insert(entitiesToInsert);
 
-        if (entitiesError) throw entitiesError;
+        if (entitiesError) {
+          console.error('Error inserting business entities:', entitiesError);
+          // Continue with suppliers insert even if entities fail
+        }
 
         // Also insert into suppliers for backward compatibility with company_id
-        const suppliersToInsert = suppliers.map(supplier => ({
+        const suppliersToInsert = uniqueSuppliers.map(supplier => ({
           company_name: supplier.name,
           contact_person: supplier.contactPerson || null,
           phone: supplier.phone || null,
@@ -237,9 +379,15 @@ export function ERPImportManager({ onClose, onImportComplete }: ERPImportManager
 
         if (suppliersError) throw suppliersError;
 
+        const skippedCount = suppliers.length - uniqueSuppliers.length;
+        let message = `Successfully imported ${uniqueSuppliers.length} suppliers`;
+        if (skippedCount > 0) {
+          message += `. ${skippedCount} duplicate(s) skipped.`;
+        }
+
         toast({
           title: "Suppliers Imported",
-          description: `Successfully imported ${suppliers.length} suppliers for ${selectedCompany.company_name}`
+          description: message
         });
       }
 

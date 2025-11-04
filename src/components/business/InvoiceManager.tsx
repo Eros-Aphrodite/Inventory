@@ -609,10 +609,11 @@ export const InvoiceManager = () => {
       }
 
       // Create invoice items (include product_id for inventory tracking)
-      const itemsToInsert = lineItems.map(item => ({
+      // Only include items with valid description and quantity > 0
+      const itemsToInsert = validLineItems.map(item => ({
         invoice_id: invoice.id,
-        product_id: item.product_id || null, // Store product_id for inventory updates
-        description: item.description,
+        product_id: item.product_id || null, // Store product_id for inventory tracking
+        description: item.description.trim(),
         quantity: item.quantity,
         unit_price: item.unit_price,
         gst_rate: item.gst_rate,
@@ -633,7 +634,7 @@ export const InvoiceManager = () => {
       
       // Only update inventory if this is a customer invoice
       if (formData.entity_type === 'customer') {
-        for (const item of lineItems) {
+        for (const item of validLineItems) {
           try {
             let productId: string | undefined = item.product_id;
             let productName = item.description;
@@ -1200,8 +1201,38 @@ export const InvoiceManager = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('User not authenticated');
 
+      const productName = pendingProductItem.description.trim();
+      const productNameLower = productName.toLowerCase();
+
+      // Check for duplicate product name
+      const { data: existingProducts, error: checkError } = await supabase
+        .from('products')
+        .select('id, name')
+        .eq('company_id', selectedCompany?.company_name || '')
+        .eq('user_id', user.id)
+        .ilike('name', productName);
+
+      if (checkError) {
+        console.error('Error checking duplicates:', checkError);
+      }
+
+      const duplicate = existingProducts?.some(p => 
+        p.name.trim().toLowerCase() === productNameLower
+      );
+
+      if (duplicate) {
+        toast({
+          title: "Duplicate Product",
+          description: `A product with the name "${productName}" already exists in this company. Please select it from the product dropdown instead.`,
+          variant: "destructive"
+        });
+        setShowAddProductDialog(false);
+        setPendingProductItem(null);
+        return;
+      }
+
       const productData = {
-        name: pendingProductItem.description,
+        name: productName,
         description: pendingProductItem.description,
         selling_price: pendingProductItem.unit_price || null,
         purchase_price: null,
@@ -1792,9 +1823,8 @@ export const InvoiceManager = () => {
                 
                 {lineItems.map((item, index) => (
                   <div key={index} className="grid grid-cols-12 gap-2 items-start mb-4 p-3 border rounded-lg bg-muted/30">
-                    {/* Product selection - Only show for customer invoices */}
-                    {formData.entity_type === 'customer' && (
-                      <div className="col-span-3">
+                    {/* Product selection - Show for all invoice types, but optional for non-customer */}
+                    <div className="col-span-3">
                         <Label className="text-sm mb-1 block">Product</Label>
                         <div className="flex gap-2">
                           <Select 
@@ -1966,33 +1996,68 @@ export const InvoiceManager = () => {
                         </Select>
                       </div>
                     </div>
-                    )}
-                    {/* Description field - Expand to col-span-4 or col-span-6 for non-customer invoices */}
+                    {/* Description field with autocomplete - Expand to col-span-4 or col-span-6 for non-customer invoices */}
                     <div className={formData.entity_type === 'customer' ? "col-span-3" : "col-span-6"}>
                       <Label htmlFor={`description-${index}`} className="text-sm mb-1 block">
                         {formData.entity_type === 'customer' ? 'Description' : 'Item/Service Description'} <span className="text-destructive">*</span>
                       </Label>
-                      <Input
-                        id={`description-${index}`}
-                        placeholder={formData.entity_type === 'customer' ? "Enter item description" : "Type any service/item name (e.g., Transport charges, Labour charges, Wholesale service, etc.)"}
-                        value={item.description}
-                        onChange={(e) => {
-                          updateLineItem(index, 'description', e.target.value);
-                        }}
-                        onBlur={(e) => {
-                          // Removed auto-create product functionality from description field
-                          // Users should select products from the dropdown instead
-                        }}
-                        onFocus={(e) => e.target.select()}
-                        required
-                        className={!item.description ? "border-destructive" : ""}
-                      />
+                      <div className="relative">
+                        <Input
+                          id={`description-${index}`}
+                          placeholder={formData.entity_type === 'customer' ? "Type item name or select from dropdown" : "Type any service/item name (e.g., Transport charges, Labour charges, Wholesale service, etc.)"}
+                          value={item.description}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            updateLineItem(index, 'description', value);
+                            
+                            // Auto-suggest product if typing matches an existing product
+                            if (value.trim() && products.length > 0) {
+                              const matchingProduct = products.find(p => 
+                                p.name.toLowerCase().includes(value.toLowerCase().trim())
+                              );
+                              
+                              if (matchingProduct && !item.product_id) {
+                                // Auto-fill price and GST if product found
+                                const updated = [...lineItems];
+                                updated[index] = {
+                                  ...updated[index],
+                                  product_id: matchingProduct.id,
+                                  unit_price: matchingProduct.selling_price || updated[index].unit_price,
+                                  gst_rate: matchingProduct.gst_rate || updated[index].gst_rate
+                                };
+                                setLineItems(updated);
+                              }
+                            }
+                          }}
+                          onFocus={(e) => e.target.select()}
+                          required
+                          className={!item.description ? "border-destructive" : ""}
+                          list={`product-suggestions-${index}`}
+                        />
+                        {formData.entity_type === 'customer' && products.length > 0 && (
+                          <datalist id={`product-suggestions-${index}`}>
+                            {products
+                              .filter(p => p.name.toLowerCase().includes(item.description.toLowerCase()) || item.description === '')
+                              .slice(0, 10)
+                              .map((product) => (
+                                <option key={product.id} value={product.name}>
+                                  {product.name} {product.selling_price ? `- ₹${product.selling_price}` : ''}
+                                </option>
+                              ))}
+                          </datalist>
+                        )}
+                      </div>
                       {!item.description && (
                         <p className="text-xs text-destructive mt-1">Description is required</p>
                       )}
                       {formData.entity_type !== 'customer' && (
                         <p className="text-xs text-muted-foreground mt-1">
                           Enter any service name, item description, or billing detail as needed
+                        </p>
+                      )}
+                      {formData.entity_type === 'customer' && item.description && !item.product_id && (
+                        <p className="text-xs text-blue-500 mt-1">
+                          💡 Tip: If this item exists in inventory, select it from the Product dropdown above to auto-fill price and GST
                         </p>
                       )}
                     </div>
@@ -2180,7 +2245,7 @@ export const InvoiceManager = () => {
                       )}
                     </CardTitle>
                      <CardDescription>
-                       {invoice.business_entities?.name || invoice.suppliers?.company_name || 'No entity'} • {invoice.invoice_date}
+                       {invoice.business_entities?.name || invoice.suppliers?.company_name || (invoice.entity_type === 'wholesaler' ? 'Wholesaler' : invoice.entity_type || 'Miscellaneous')} • {invoice.invoice_date}
                      </CardDescription>
                   </div>
                   <div className="flex gap-2">
@@ -2301,7 +2366,11 @@ export const InvoiceManager = () => {
               <div className="grid grid-cols-2 gap-4">
                  <div>
                    <p className="text-sm text-muted-foreground">Entity</p>
-                   <p className="font-medium">{selectedInvoice.business_entities?.name || selectedInvoice.suppliers?.company_name || 'N/A'}</p>
+                   <p className="font-medium">
+                     {selectedInvoice.business_entities?.name || 
+                      selectedInvoice.suppliers?.company_name || 
+                      (selectedInvoice.entity_type === 'wholesaler' ? 'Wholesaler' : selectedInvoice.entity_type || 'Miscellaneous')}
+                   </p>
                  </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Date</p>

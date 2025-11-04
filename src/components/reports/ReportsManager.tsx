@@ -719,73 +719,130 @@ export const ReportsManager: React.FC = () => {
         }
 
         case 'trial-balance': {
-          // Fetch ledgers for the selected company with ledger entries for period transactions
-          const { data: { user } } = await supabase.auth.getUser();
-          const { data: ledgersData } = await supabase
-            .from('ledgers')
-            .select('id, name, ledger_type, current_balance, opening_balance')
-            .eq('company_id', selectedCompany.company_name);
-
-          // Fetch ledger entries for the period to calculate debits and credits
-          const ledgerIds = (ledgersData || []).map(l => l.id);
-          let ledgerEntriesMap = new Map<string, { debits: number; credits: number }>();
-          
-          if (ledgerIds.length > 0 && user?.id) {
-            const { data: entriesData } = await supabase
-              .from('ledger_entries')
-              .select('ledger_id, debit_amount, credit_amount')
-              .in('ledger_id', ledgerIds)
-              .eq('user_id', user.id)
-              .gte('entry_date', dateFrom)
-              .lte('entry_date', dateTo);
-
-            (entriesData || []).forEach(entry => {
-              const ledgerId = entry.ledger_id;
-              const current = ledgerEntriesMap.get(ledgerId) || { debits: 0, credits: 0 };
-              ledgerEntriesMap.set(ledgerId, {
-                debits: current.debits + (entry.debit_amount || 0),
-                credits: current.credits + (entry.credit_amount || 0)
+          try {
+            // Fetch ledgers for the selected company with ledger entries for period transactions
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user?.id) {
+              toast({
+                title: "Error",
+                description: "User not authenticated",
+                variant: "destructive"
               });
-            });
-          }
+              throw new Error('User not authenticated');
+            }
 
-          // Calculate all ledgers with opening, debits, credits, and closing balance
-          sampleData = (ledgersData || []).map((l: any) => {
-            const entries = ledgerEntriesMap.get(l.id) || { debits: 0, credits: 0 };
-            const openingBalance = l.opening_balance || 0;
-            const debits = entries.debits;
-            const credits = entries.credits;
-            // Closing balance = Opening + Credits - Debits (for liability/equity)
-            // Or Opening + Debits - Credits (for asset/expense)
-            const isCreditBalance = ['capital', 'equity', 'loan', 'payables', 'liability', 'income'].includes(l.ledger_type);
-            const closingBalance = isCreditBalance 
-              ? openingBalance + credits - debits
-              : openingBalance + debits - credits;
+            const { data: ledgersData, error: ledgersError } = await supabase
+              .from('ledgers')
+              .select('id, name, ledger_type, current_balance, opening_balance')
+              .eq('company_id', selectedCompany.company_name)
+              .eq('user_id', user.id);
+
+            if (ledgersError) {
+              console.error('Error fetching ledgers:', ledgersError);
+              throw ledgersError;
+            }
+
+            // Initialize with empty array if no ledgers found
+            const ledgers = ledgersData || [];
+            const ledgerIds = ledgers.map(l => l.id);
+            let ledgerEntriesMap = new Map<string, { debits: number; credits: number }>();
             
-            return {
-              subcategory: l.name,
-              amount: closingBalance,
-              category: l.ledger_type || 'other',
-              opening_balance: openingBalance,
-              debits: debits,
-              credits: credits,
-              closing_balance: closingBalance,
-              difference: closingBalance - openingBalance
+            // Fetch ledger entries for the period to calculate debits and credits
+            if (ledgerIds.length > 0) {
+              const { data: entriesData, error: entriesError } = await supabase
+                .from('ledger_entries')
+                .select('ledger_id, debit_amount, credit_amount')
+                .in('ledger_id', ledgerIds)
+                .eq('user_id', user.id)
+                .gte('entry_date', dateFrom)
+                .lte('entry_date', dateTo);
+
+              if (entriesError) {
+                console.error('Error fetching ledger entries:', entriesError);
+                // Continue with empty entries if fetch fails
+              } else {
+                (entriesData || []).forEach(entry => {
+                  const ledgerId = entry.ledger_id;
+                  const current = ledgerEntriesMap.get(ledgerId) || { debits: 0, credits: 0 };
+                  ledgerEntriesMap.set(ledgerId, {
+                    debits: current.debits + (Number(entry.debit_amount) || 0),
+                    credits: current.credits + (Number(entry.credit_amount) || 0)
+                  });
+                });
+              }
+            }
+
+            // Calculate all ledgers with opening, debits, credits, and closing balance
+            sampleData = ledgers.map((l: any) => {
+              const entries = ledgerEntriesMap.get(l.id) || { debits: 0, credits: 0 };
+              const openingBalance = Number(l.opening_balance) || 0;
+              const debits = Number(entries.debits) || 0;
+              const credits = Number(entries.credits) || 0;
+              
+              // Closing balance = Opening + Credits - Debits (for liability/equity)
+              // Or Opening + Debits - Credits (for asset/expense)
+              const isCreditBalance = ['capital', 'equity', 'loan', 'payables', 'liability', 'income'].includes(l.ledger_type?.toLowerCase() || '');
+              const closingBalance = isCreditBalance 
+                ? openingBalance + credits - debits
+                : openingBalance + debits - credits;
+              
+              return {
+                subcategory: l.name || 'Unknown',
+                amount: closingBalance,
+                category: l.ledger_type || 'other',
+                opening_balance: openingBalance,
+                debits: debits,
+                credits: credits,
+                closing_balance: closingBalance,
+                difference: closingBalance - openingBalance
+              };
+            });
+
+            // Calculate totals - handle empty arrays safely
+            const totalDebits = ledgerEntriesMap.size > 0 
+              ? Array.from(ledgerEntriesMap.values()).reduce((sum, e) => sum + (Number(e.debits) || 0), 0)
+              : 0;
+            const totalCredits = ledgerEntriesMap.size > 0
+              ? Array.from(ledgerEntriesMap.values()).reduce((sum, e) => sum + (Number(e.credits) || 0), 0)
+              : 0;
+            const totalOpening = ledgers.length > 0
+              ? ledgers.reduce((sum, l: any) => sum + (Number(l.opening_balance) || 0), 0)
+              : 0;
+            const totalClosing = sampleData.length > 0
+              ? sampleData.reduce((sum, item: any) => sum + (Number(item.closing_balance) || 0), 0)
+              : 0;
+            const difference = totalDebits - totalCredits;
+
+            newSummary = {
+              totalSales: totalCredits,
+              totalPurchases: totalDebits,
+              grossProfit: totalClosing - totalOpening,
+              netProfit: difference // Store difference for display
             };
-          });
-
-          // Calculate totals
-          const totalDebits = Array.from(ledgerEntriesMap.values()).reduce((sum, e) => sum + e.debits, 0);
-          const totalCredits = Array.from(ledgerEntriesMap.values()).reduce((sum, e) => sum + e.credits, 0);
-          const totalOpening = (ledgersData || []).reduce((sum, l: any) => sum + (l.opening_balance || 0), 0);
-          const totalClosing = sampleData.reduce((sum, item: any) => sum + (item.closing_balance || 0), 0);
-
-          newSummary = {
-            totalSales: totalCredits,
-            totalPurchases: totalDebits,
-            grossProfit: totalClosing - totalOpening,
-            netProfit: totalClosing
-          };
+            
+            // Show message if no ledgers found
+            if (ledgers.length === 0) {
+              toast({
+                title: "No Ledgers Found",
+                description: "No ledgers found for this company. Please create ledgers first.",
+                variant: "default"
+              });
+            }
+          } catch (error: any) {
+            console.error('Trial balance error:', error);
+            toast({
+              title: "Error",
+              description: error.message || "Failed to generate trial balance report",
+              variant: "destructive"
+            });
+            sampleData = [];
+            newSummary = {
+              totalSales: 0,
+              totalPurchases: 0,
+              grossProfit: 0,
+              netProfit: 0
+            };
+          }
           break;
         }
         
@@ -1005,20 +1062,123 @@ export const ReportsManager: React.FC = () => {
         }
         
         case 'ledger-summary': {
-          sampleData = [
-            { subcategory: 'Cash Account', amount: 50000, category: 'asset' },
-            { subcategory: 'Bank Account', amount: 150000, category: 'asset' },
-            { subcategory: 'Accounts Receivable', amount: 25000, category: 'asset' },
-            { subcategory: 'Accounts Payable', amount: 75000, category: 'liability' },
-            { subcategory: 'Sales Revenue', amount: newSummary.totalSales || 100000, category: 'income' },
-            { subcategory: 'Purchase Expenses', amount: newSummary.totalPurchases || 60000, category: 'expense' }
-          ];
-          newSummary = {
-            totalSales: 100000,
-            totalPurchases: 60000,
-            grossProfit: 40000,
-            netProfit: 40000
-          };
+          try {
+            // Fetch ledgers for the selected company
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user?.id) {
+              toast({
+                title: "Error",
+                description: "User not authenticated",
+                variant: "destructive"
+              });
+              throw new Error('User not authenticated');
+            }
+
+            const { data: ledgersData, error: ledgersError } = await supabase
+              .from('ledgers')
+              .select('id, name, ledger_type, current_balance, opening_balance')
+              .eq('company_id', selectedCompany.company_name)
+              .eq('user_id', user.id);
+
+            if (ledgersError) {
+              console.error('Error fetching ledgers:', ledgersError);
+              throw ledgersError;
+            }
+
+            const ledgers = ledgersData || [];
+            const ledgerIds = ledgers.map(l => l.id);
+            let ledgerEntriesMap = new Map<string, { debits: number; credits: number }>();
+            
+            // Fetch all ledger entries (not just period) for summary
+            if (ledgerIds.length > 0) {
+              const { data: entriesData, error: entriesError } = await supabase
+                .from('ledger_entries')
+                .select('ledger_id, debit_amount, credit_amount')
+                .in('ledger_id', ledgerIds)
+                .eq('user_id', user.id);
+
+              if (entriesError) {
+                console.error('Error fetching ledger entries:', entriesError);
+              } else {
+                (entriesData || []).forEach(entry => {
+                  const ledgerId = entry.ledger_id;
+                  const current = ledgerEntriesMap.get(ledgerId) || { debits: 0, credits: 0 };
+                  ledgerEntriesMap.set(ledgerId, {
+                    debits: current.debits + (Number(entry.debit_amount) || 0),
+                    credits: current.credits + (Number(entry.credit_amount) || 0)
+                  });
+                });
+              }
+            }
+
+            // Calculate all ledgers with opening, debits, credits, and closing balance
+            sampleData = ledgers.map((l: any) => {
+              const entries = ledgerEntriesMap.get(l.id) || { debits: 0, credits: 0 };
+              const openingBalance = Number(l.opening_balance) || 0;
+              const debits = Number(entries.debits) || 0;
+              const credits = Number(entries.credits) || 0;
+              
+              // Closing balance calculation
+              const isCreditBalance = ['capital', 'equity', 'loan', 'payables', 'liability', 'income'].includes(l.ledger_type?.toLowerCase() || '');
+              const closingBalance = isCreditBalance 
+                ? openingBalance + credits - debits
+                : openingBalance + debits - credits;
+              
+              return {
+                subcategory: l.name || 'Unknown',
+                amount: closingBalance,
+                category: l.ledger_type || 'other',
+                opening_balance: openingBalance,
+                debits: debits,
+                credits: credits,
+                closing_balance: closingBalance
+              };
+            });
+
+            // Calculate totals - handle empty arrays safely
+            const totalDebits = ledgerEntriesMap.size > 0 
+              ? Array.from(ledgerEntriesMap.values()).reduce((sum, e) => sum + (Number(e.debits) || 0), 0)
+              : 0;
+            const totalCredits = ledgerEntriesMap.size > 0
+              ? Array.from(ledgerEntriesMap.values()).reduce((sum, e) => sum + (Number(e.credits) || 0), 0)
+              : 0;
+            const totalOpening = ledgers.length > 0
+              ? ledgers.reduce((sum, l: any) => sum + (Number(l.opening_balance) || 0), 0)
+              : 0;
+            const totalClosing = sampleData.length > 0
+              ? sampleData.reduce((sum, item: any) => sum + (Number(item.closing_balance) || 0), 0)
+              : 0;
+
+            newSummary = {
+              totalSales: totalCredits,
+              totalPurchases: totalDebits,
+              grossProfit: totalClosing - totalOpening,
+              netProfit: totalClosing
+            };
+            
+            // Show message if no ledgers found
+            if (ledgers.length === 0) {
+              toast({
+                title: "No Ledgers Found",
+                description: "No ledgers found for this company. Please create ledgers first.",
+                variant: "default"
+              });
+            }
+          } catch (error: any) {
+            console.error('Ledger summary error:', error);
+            toast({
+              title: "Error",
+              description: error.message || "Failed to generate ledger summary report",
+              variant: "destructive"
+            });
+            sampleData = [];
+            newSummary = {
+              totalSales: 0,
+              totalPurchases: 0,
+              grossProfit: 0,
+              netProfit: 0
+            };
+          }
           break;
         }
         
@@ -1326,10 +1486,10 @@ export const ReportsManager: React.FC = () => {
                         <>
                           <TableCell className="font-medium">{row.subcategory}</TableCell>
                           <TableCell>{row.category}</TableCell>
-                          <TableCell className="text-right">{formatIndianCurrency(row.amount >= 0 ? row.amount : 0)}</TableCell>
-                          <TableCell className="text-right">{formatIndianCurrency(0)}</TableCell>
-                          <TableCell className="text-right">{formatIndianCurrency(0)}</TableCell>
-                          <TableCell className="text-right">{formatIndianCurrency(Math.abs(row.amount))}</TableCell>
+                          <TableCell className="text-right">{formatIndianCurrency(Number(row.opening_balance) || 0)}</TableCell>
+                          <TableCell className="text-right">{formatIndianCurrency(Number(row.debits) || 0)}</TableCell>
+                          <TableCell className="text-right">{formatIndianCurrency(Number(row.credits) || 0)}</TableCell>
+                          <TableCell className="text-right">{formatIndianCurrency(Number(row.closing_balance) || 0)}</TableCell>
                         </>
                       )}
                       {selectedReport === 'sales-report' && (
@@ -1406,10 +1566,10 @@ export const ReportsManager: React.FC = () => {
                               {row.category}
                             </Badge>
                           </TableCell>
-                          <TableCell className="text-right">{formatIndianCurrency(row.amount)}</TableCell>
-                          <TableCell className="text-right">{formatIndianCurrency(10000)}</TableCell>
-                          <TableCell className="text-right">{formatIndianCurrency(15000)}</TableCell>
-                          <TableCell className="text-right">{formatIndianCurrency(row.amount + 5000)}</TableCell>
+                          <TableCell className="text-right">{formatIndianCurrency(Number(row.opening_balance) || 0)}</TableCell>
+                          <TableCell className="text-right">{formatIndianCurrency(Number(row.debits) || 0)}</TableCell>
+                          <TableCell className="text-right">{formatIndianCurrency(Number(row.credits) || 0)}</TableCell>
+                          <TableCell className="text-right">{formatIndianCurrency(Number(row.closing_balance) || 0)}</TableCell>
                         </>
                       )}
                       {selectedReport === 'invoice-aging' && (
@@ -1500,19 +1660,20 @@ export const ReportsManager: React.FC = () => {
                     <div className="text-center">
                       <p className="text-sm text-muted-foreground">Total Debits</p>
                       <p className="text-lg font-semibold text-red-500">
-                        {formatIndianCurrency(30000)}
+                        {formatIndianCurrency(summary.totalPurchases)}
                       </p>
                     </div>
                     <div className="text-center">
                       <p className="text-sm text-muted-foreground">Total Credits</p>
                       <p className="text-lg font-semibold text-green-500">
-                        {formatIndianCurrency(35000)}
+                        {formatIndianCurrency(summary.totalSales)}
                       </p>
                     </div>
                     <div className="text-center">
                       <p className="text-sm text-muted-foreground">Difference</p>
-                      <p className="text-lg font-semibold text-blue-500">
-                        {formatIndianCurrency(5000)}
+                      <p className={`text-lg font-semibold ${summary.netProfit < 0 ? 'text-red-500' : summary.netProfit > 0 ? 'text-blue-500' : 'text-green-500'}`}>
+                        {formatIndianCurrency(Math.abs(summary.netProfit))}
+                        {summary.netProfit !== 0 && (summary.netProfit < 0 ? ' (Dr)' : ' (Cr)')}
                       </p>
                     </div>
                   </>

@@ -15,7 +15,8 @@ import {
   LogOut,
   Receipt,
   BookOpen,
-  Settings
+  Settings,
+  CreditCard
 } from "lucide-react";
 import { StatCard } from "@/components/inventory/StatCard";
 import { NavButton } from "@/components/inventory/NavButton";
@@ -41,6 +42,7 @@ const PurchaseOrderManager = lazy(() => import("@/components/business/PurchaseOr
 const StockTakeManager = lazy(() => import("@/components/inventory/StockTakeManager").then(m => ({ default: m.StockTakeManager })));
 const CompanySettings = lazy(() => import("@/components/business/CompanySettings").then(m => ({ default: m.CompanySettings })));
 const ReportsManager = lazy(() => import("@/components/reports/ReportsManager").then(m => ({ default: m.ReportsManager })));
+const SubscriptionManager = lazy(() => import("@/components/subscription/SubscriptionManager").then(m => ({ default: m.SubscriptionManager })));
 
 const Index = () => {
   const { user, signOut } = useAuth();
@@ -584,6 +586,13 @@ const Index = () => {
                   onClick={setActiveTab}
                 />
                 <NavButton
+                  id="subscription"
+                  label="Subscription"
+                  icon={<CreditCard className="h-5 w-5" />}
+                  active={activeTab === "subscription"}
+                  onClick={setActiveTab}
+                />
+                <NavButton
                   id="settings"
                   label="Company Settings"
                   icon={<Settings className="h-6 w-6" />}
@@ -763,11 +772,12 @@ const Index = () => {
                   {activeTab === "purchase-orders" && <PurchaseOrderManager />}
                   {activeTab === "invoices" && <InvoiceManager />}
                   {activeTab === "suppliers" && <SuppliersManager />}
+                  {activeTab === "subscription" && <SubscriptionManager />}
                   {activeTab === "settings" && <CompanySettings />}
                 </Suspense>
 
                 {/* Other Tabs - Placeholder for now */}
-                {!["dashboard", "gst-calculator", "gst-tracker", "reports", "ledger", "products", "stock-take", "purchase-orders", "invoices", "suppliers", "settings"].includes(activeTab) && (
+                {!["dashboard", "gst-calculator", "gst-tracker", "reports", "ledger", "products", "stock-take", "purchase-orders", "invoices", "suppliers", "subscription", "settings"].includes(activeTab) && (
                   <div className="bg-card rounded-lg shadow-sm p-8 text-center border border-border">
                     <div className="text-muted-foreground text-6xl mb-4">
                       <Package className="h-16 w-16 mx-auto" />

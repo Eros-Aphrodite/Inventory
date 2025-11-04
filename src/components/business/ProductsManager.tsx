@@ -40,6 +40,7 @@ export const ProductsManager = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [productSearch, setProductSearch] = useState("");
+  const [showLowStockOnly, setShowLowStockOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -148,6 +149,44 @@ export const ProductsManager = () => {
       };
 
       if (editingProduct) {
+        // For editing, check if the new name conflicts with another product (excluding current product)
+        const productNameLower = productData.name.trim().toLowerCase();
+        const { data: existingProducts } = await supabase
+          .from('products')
+          .select('id, name, sku')
+          .eq('company_id', selectedCompany?.company_name || '')
+          .eq('user_id', user.id)
+          .neq('id', editingProduct.id);
+
+        const nameConflict = existingProducts?.some(p => 
+          p.name.trim().toLowerCase() === productNameLower
+        );
+        
+        if (nameConflict) {
+          toast({
+            title: "Duplicate Product",
+            description: `A product with the name "${productData.name}" already exists in this company. Please use a different name.`,
+            variant: "destructive"
+          });
+          return;
+        }
+
+        // Check SKU conflict if SKU is provided
+        if (productData.sku) {
+          const skuConflict = existingProducts?.some(p => 
+            p.sku && p.sku.trim().toLowerCase() === productData.sku!.trim().toLowerCase()
+          );
+          
+          if (skuConflict) {
+            toast({
+              title: "Duplicate SKU",
+              description: `A product with SKU "${productData.sku}" already exists in this company. Please use a different SKU.`,
+              variant: "destructive"
+            });
+            return;
+          }
+        }
+
         const { error } = await supabase
           .from('products')
           .update(productData)
@@ -156,6 +195,53 @@ export const ProductsManager = () => {
         if (error) throw error;
         toast({ title: "Success", description: "Product updated successfully" });
       } else {
+        // For new products, check for duplicates
+        const productNameLower = productData.name.trim().toLowerCase();
+        let duplicateCheck = supabase
+          .from('products')
+          .select('id, name, sku')
+          .eq('company_id', selectedCompany?.company_name || '')
+          .eq('user_id', user.id)
+          .ilike('name', productData.name);
+
+        if (productData.sku) {
+          duplicateCheck = duplicateCheck.or(`sku.ilike."${productData.sku}"`);
+        }
+
+        const { data: existingProducts, error: checkError } = await duplicateCheck;
+
+        if (checkError) {
+          console.error('Error checking duplicates:', checkError);
+        }
+
+        const nameDuplicate = existingProducts?.some(p => 
+          p.name.trim().toLowerCase() === productNameLower
+        );
+        
+        if (nameDuplicate) {
+          toast({
+            title: "Duplicate Product",
+            description: `A product with the name "${productData.name}" already exists in this company. Please use a different name or edit the existing product.`,
+            variant: "destructive"
+          });
+          return;
+        }
+
+        if (productData.sku) {
+          const skuDuplicate = existingProducts?.some(p => 
+            p.sku && p.sku.trim().toLowerCase() === productData.sku!.trim().toLowerCase()
+          );
+          
+          if (skuDuplicate) {
+            toast({
+              title: "Duplicate SKU",
+              description: `A product with SKU "${productData.sku}" already exists in this company. Please use a different SKU.`,
+              variant: "destructive"
+            });
+            return;
+          }
+        }
+
         const { error } = await supabase
           .from('products')
           .insert([productData]);
@@ -511,7 +597,20 @@ export const ProductsManager = () => {
           placeholder="Search by name, SKU, HSN..."
           value={productSearch}
           onChange={(e) => setProductSearch(e.target.value)}
+          className="flex-1"
         />
+        <div className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="low-stock-filter"
+            checked={showLowStockOnly}
+            onChange={(e) => setShowLowStockOnly(e.target.checked)}
+            className="w-4 h-4 rounded border-gray-300"
+          />
+          <label htmlFor="low-stock-filter" className="text-sm text-muted-foreground cursor-pointer">
+            Show Low Stock Only
+          </label>
+        </div>
       </div>
 
       <div className="grid gap-4">
@@ -555,6 +654,12 @@ export const ProductsManager = () => {
           <>
             {products
               .filter((p) => {
+                // Apply low stock filter
+                if (showLowStockOnly && (p.current_stock || 0) > (p.min_stock_level || 0)) {
+                  return false;
+                }
+                
+                // Apply search filter
                 if (!productSearch.trim()) return true;
                 const term = productSearch.toLowerCase();
                 return (
