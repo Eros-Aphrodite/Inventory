@@ -1,6 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Upload, FileText, AlertCircle, CheckCircle, AlertTriangle, Info, Download, Users, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
@@ -24,6 +26,8 @@ export function ERPImportManager({ onClose, onImportComplete }: ERPImportManager
   const [isProcessing, setIsProcessing] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [currentStep, setCurrentStep] = useState<'upload' | 'preview' | 'complete'>('upload');
+  const [selectedSupplierId, setSelectedSupplierId] = useState<string>("");
+  const [suppliers, setSuppliers] = useState<Array<{ id: string; company_name: string }>>([]);
   const { toast } = useToast();
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -118,7 +122,7 @@ export function ERPImportManager({ onClose, onImportComplete }: ERPImportManager
           current_stock: product.currentStock || 0,
           min_stock_level: product.minStock || 0,
           max_stock_level: product.maxStock || null,
-          supplier_id: null // Supplier is optional - can be assigned later through product edit
+          supplier_id: selectedSupplierId || null // Assign selected supplier if provided, otherwise null
         }));
 
         const { data: userData } = await supabase.auth.getUser();
@@ -424,7 +428,42 @@ export function ERPImportManager({ onClose, onImportComplete }: ERPImportManager
     setFile(null);
     setParseResult(null);
     setCurrentStep('upload');
+    setSelectedSupplierId("");
   };
+
+  // Fetch suppliers when component mounts or company changes
+  React.useEffect(() => {
+    const fetchSuppliers = async () => {
+      if (!selectedCompany?.company_name) {
+        setSuppliers([]);
+        return;
+      }
+
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data, error } = await supabase
+          .from('suppliers')
+          .select('id, company_name')
+          .eq('company_id', selectedCompany.company_name)
+          .eq('user_id', user.id)
+          .order('company_name');
+
+        if (error) {
+          console.error('Error fetching suppliers:', error);
+          setSuppliers([]);
+        } else {
+          setSuppliers(data || []);
+        }
+      } catch (error) {
+        console.error('Error fetching suppliers:', error);
+        setSuppliers([]);
+      }
+    };
+
+    fetchSuppliers();
+  }, [selectedCompany]);
 
   const getTotalValue = (): number => {
     if (!parseResult?.data) return 0;
@@ -491,6 +530,9 @@ export function ERPImportManager({ onClose, onImportComplete }: ERPImportManager
                 onDownloadTemplate={downloadSampleTemplate}
                 onReset={resetForm}
                 getTotalValue={getTotalValue}
+                selectedSupplierId={selectedSupplierId}
+                onSupplierChange={setSelectedSupplierId}
+                suppliers={suppliers}
               />
             </CardContent>
           </Card>
@@ -538,6 +580,9 @@ interface ImportContentProps {
   onDownloadTemplate: () => void;
   onReset: () => void;
   getTotalValue: () => number;
+  selectedSupplierId?: string;
+  onSupplierChange?: (supplierId: string) => void;
+  suppliers?: Array<{ id: string; company_name: string }>;
 }
 
 function ImportContent({
@@ -551,7 +596,10 @@ function ImportContent({
   onConfirmImport,
   onDownloadTemplate,
   onReset,
-  getTotalValue
+  getTotalValue,
+  selectedSupplierId = "",
+  onSupplierChange,
+  suppliers = []
 }: ImportContentProps) {
   const { selectedCompany } = useCompany();
   return (
@@ -750,6 +798,54 @@ function ImportContent({
                   <div className="text-sm text-warning/70 italic">
                     ... and {parseResult.warnings.length - 5} more warnings
                   </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Assign Supplier (Optional) - Only show for products */}
+          {type === 'products' && (
+            <div className="bg-card rounded-lg shadow-sm p-4 border border-border" key="supplier-assignment-section">
+              <div className="space-y-2">
+                <Label htmlFor="supplier-select" className="text-base font-semibold">
+                  Assign Supplier (Optional)
+                </Label>
+                <p className="text-sm text-muted-foreground">
+                  Select a supplier to assign to all imported products, or leave empty to assign later on the product details page.
+                </p>
+                {suppliers.length === 0 ? (
+                  <div className="p-3 bg-muted/50 rounded-lg border border-border">
+                    <p className="text-sm text-muted-foreground">
+                      No suppliers found. You can import suppliers first or assign suppliers later on the product details page.
+                    </p>
+                  </div>
+                ) : (
+                <Select
+                  value={selectedSupplierId || "__none__"}
+                  onValueChange={(value) => {
+                    if (onSupplierChange) {
+                      // Use empty string internally but "__none__" for the Select component
+                      onSupplierChange(value === "__none__" ? "" : value);
+                    }
+                  }}
+                >
+                  <SelectTrigger id="supplier-select" className="w-full">
+                    <SelectValue placeholder="Select Supplier" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">No Supplier (Assign Later)</SelectItem>
+                    {suppliers.map((supplier) => (
+                      <SelectItem key={supplier.id} value={supplier.id}>
+                        {supplier.company_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                )}
+                {selectedSupplierId && suppliers.length > 0 && (
+                  <p className="text-xs text-primary mt-2">
+                    ✓ All imported products will be assigned to: {suppliers.find(s => s.id === selectedSupplierId)?.company_name || 'Selected Supplier'}
+                  </p>
                 )}
               </div>
             </div>
