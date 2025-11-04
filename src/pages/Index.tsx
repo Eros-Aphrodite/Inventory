@@ -317,7 +317,7 @@ const Index = () => {
             <div className="flex items-center space-x-4">
               <h1 className="text-xl font-bold text-card-foreground flex items-center gap-2">
                 <Package className="h-6 w-6" />
-                Inventory Manager
+                Inventory Migrator
               </h1>
               {isOffline && (
                 <span className="bg-warning/10 text-warning px-2 py-1 rounded-full text-xs flex items-center gap-1">

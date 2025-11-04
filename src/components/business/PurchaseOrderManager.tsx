@@ -131,6 +131,7 @@ export const PurchaseOrderManager = () => {
             description,
             quantity,
             unit_price,
+            gst_rate,
             line_total,
             received_quantity
           )
@@ -155,6 +156,7 @@ export const PurchaseOrderManager = () => {
             description: item.description,
             quantity: item.quantity,
             unit_price: item.unit_price,
+            gst_rate: item.gst_rate || 18,
             line_total: item.line_total,
             received_quantity: item.received_quantity || 0
           }))
@@ -1065,6 +1067,7 @@ Total: ${formatIndianCurrency(po.total_amount)}`;
                             <div className="flex items-center gap-4 ml-4">
                               <span className="text-muted-foreground">Qty: <span className="font-medium">{item.quantity}</span></span>
                               <span className="text-muted-foreground">@ <span className="font-medium">{formatIndianCurrency(item.unit_price)}</span></span>
+                              <span className="text-muted-foreground">GST: <span className="font-medium">{item.gst_rate}%</span></span>
                               <span className="font-semibold">{formatIndianCurrency(item.line_total)}</span>
                             </div>
                           </div>

@@ -5,7 +5,7 @@ export interface InvoiceGSTData {
   invoice_id: string;
   invoice_number: string;
   invoice_date: string;
-  transaction_type: 'sale' | 'purchase';
+  transaction_type: 'sale' | 'purchase' | 'sale_return' | 'purchase_return';
   entity_name: string;
   entity_id: string;
   subtotal: number;
@@ -13,6 +13,7 @@ export interface InvoiceGSTData {
   total_amount: number;
   from_state: string;
   to_state: string;
+  forceIGST?: boolean;
   line_items: Array<{
     description: string;
     quantity: number;
@@ -56,6 +57,10 @@ export class GSTSyncService {
         gstConfig
       );
 
+      // For return transactions, make amounts negative to deduct from totals
+      const isReturn = invoiceData.transaction_type === 'sale_return' || invoiceData.transaction_type === 'purchase_return';
+      const multiplier = isReturn ? -1 : 1;
+
       // Create GST entry
       const { data: gstEntry, error } = await supabase
         .from('gst_entries')
@@ -64,13 +69,13 @@ export class GSTSyncService {
           entity_name: invoiceData.entity_name,
           invoice_number: invoiceData.invoice_number,
           invoice_date: invoiceData.invoice_date,
-          taxable_amount: breakdown.taxableAmount,
+          taxable_amount: breakdown.taxableAmount * multiplier,
           gst_rate: this.calculateAverageGSTRate(invoiceData.line_items),
-          cgst: breakdown.cgst,
-          sgst: breakdown.sgst,
-          igst: breakdown.igst,
-          total_gst: breakdown.totalGST,
-          total_amount: breakdown.totalAmount,
+          cgst: breakdown.cgst * multiplier,
+          sgst: breakdown.sgst * multiplier,
+          igst: breakdown.igst * multiplier,
+          total_gst: breakdown.totalGST * multiplier,
+          total_amount: breakdown.totalAmount * multiplier,
           from_state: invoiceData.from_state,
           to_state: invoiceData.to_state,
           is_interstate: gstConfig.isInterState,

@@ -207,7 +207,7 @@ const Landing = () => {
               </div>
               <div>
                 <span className="text-2xl font-black bg-gradient-to-r from-white via-blue-200 to-purple-200 bg-clip-text text-transparent tracking-tight">
-                  InventoryPath
+                  Inventory Migrator
                 </span>
                 <div className="text-[10px] text-primary/80 font-bold -mt-1 tracking-wider uppercase">
                   Smart Inventory
@@ -510,7 +510,7 @@ const Landing = () => {
               <span className="block shimmer-text mt-2">Inventory Management?</span>
             </h2>
             <p className="text-xl text-white/80 mb-12 max-w-3xl mx-auto font-light">
-              Join thousands of businesses using InventoryPath to streamline their inventory operations.
+              Join thousands of businesses using Inventory Migrator to streamline their inventory operations.
             </p>
             <div className="flex flex-col sm:flex-row gap-6 justify-center">
               <Button
@@ -549,7 +549,7 @@ const Landing = () => {
                 </div>
                 <div>
                   <span className="text-2xl font-black bg-gradient-to-r from-white to-primary bg-clip-text text-transparent">
-                    InventoryPath
+                    Inventory Migrator
                   </span>
                 </div>
               </div>
@@ -659,7 +659,7 @@ const Landing = () => {
           {/* Bottom Section: Copyright and Policies */}
           <div className="border-t border-white/10 pt-8 flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="text-white/60 text-sm">
-              © 2025 InventoryPath. All rights reserved.
+              © 2025 Inventory Migrator. All rights reserved.
             </div>
             <div className="flex items-center gap-6">
               <a href="#" className="text-white/60 hover:text-primary text-sm transition-colors duration-200">

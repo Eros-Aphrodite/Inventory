@@ -160,12 +160,14 @@ export const InvoiceManager = () => {
     quantity: number;
     unit_price: number;
     gst_rate: number;
+    max_quantity?: number; // For return invoices, store original quantity
   }>>([{
     product_id: undefined,
     description: "",
     quantity: 1,
     unit_price: 0,
-    gst_rate: 18
+    gst_rate: 18,
+    max_quantity: undefined
   }]);
   const [companyState, setCompanyState] = useState('27'); // Default to Maharashtra
   const [forceIGST, setForceIGST] = useState(false); // Manual IGST selection override
@@ -365,15 +367,26 @@ export const InvoiceManager = () => {
       setPOItems(data || []);
 
       // Populate line items from PO
+      // For return invoices, start with quantity 0 so user can specify return quantity
+      // For purchase invoices, use full quantity
       if (data && data.length > 0) {
         const items = data.map(item => ({
           product_id: item.product_id || undefined,
           description: item.description,
-          quantity: item.quantity,
+          quantity: (formData.invoice_type === 'sale_return' || formData.invoice_type === 'purchase_return') ? 0 : item.quantity,
           unit_price: item.unit_price,
-          gst_rate: item.gst_rate
+          gst_rate: item.gst_rate,
+          max_quantity: (formData.invoice_type === 'sale_return' || formData.invoice_type === 'purchase_return') ? item.quantity : undefined
         }));
         setLineItems(items);
+        
+        // Show message for return invoices
+        if (formData.invoice_type === 'sale_return' || formData.invoice_type === 'purchase_return') {
+          toast({
+            title: "Return Invoice",
+            description: "Items loaded. Please specify the return quantity for each item (0 to skip, max = original quantity).",
+          });
+        }
       }
     } catch (error) {
       console.error('Failed to load PO items:', error);
@@ -1140,7 +1153,8 @@ export const InvoiceManager = () => {
       description: "",
       quantity: 1,
       unit_price: 0,
-      gst_rate: 18
+      gst_rate: 18,
+      max_quantity: undefined
     }]);
     setForceIGST(false);
     setShowNewEntityForm(false);
@@ -1155,7 +1169,8 @@ export const InvoiceManager = () => {
       description: "",
       quantity: 1,
       unit_price: 0,
-      gst_rate: 18
+      gst_rate: 18,
+      max_quantity: undefined
     }]);
   };
 
@@ -1282,7 +1297,8 @@ export const InvoiceManager = () => {
               description: "",
               quantity: 1,
               unit_price: 0,
-              gst_rate: 18
+              gst_rate: 18,
+              max_quantity: undefined
             }]);
             setForceIGST(false);
             setShowNewEntityForm(false);
@@ -1981,17 +1997,35 @@ export const InvoiceManager = () => {
                       )}
                     </div>
                     <div className="col-span-2">
-                      <Label htmlFor={`quantity-${index}`} className="text-sm mb-1 block">Quantity</Label>
+                      <Label htmlFor={`quantity-${index}`} className="text-sm mb-1 block">
+                        Quantity
+                        {(formData.invoice_type === 'sale_return' || formData.invoice_type === 'purchase_return') && item.max_quantity && (
+                          <span className="text-xs text-muted-foreground ml-1">(Max: {item.max_quantity})</span>
+                        )}
+                      </Label>
                       <Input
                         id={`quantity-${index}`}
                         type="number"
                         placeholder="Qty"
                         value={item.quantity}
-                        onChange={(e) => updateLineItem(index, 'quantity', parseFloat(e.target.value) || 0)}
+                        onChange={(e) => {
+                          let qty = parseFloat(e.target.value) || 0;
+                          // For return invoices, enforce max quantity
+                          if ((formData.invoice_type === 'sale_return' || formData.invoice_type === 'purchase_return') && item.max_quantity) {
+                            qty = Math.min(qty, item.max_quantity);
+                          }
+                          updateLineItem(index, 'quantity', qty);
+                        }}
                         min="0"
+                        max={item.max_quantity}
                         step="0.01"
                         required
                       />
+                      {(formData.invoice_type === 'sale_return' || formData.invoice_type === 'purchase_return') && item.max_quantity && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Original quantity: {item.max_quantity}. Set to 0 to skip this item.
+                        </p>
+                      )}
                     </div>
                     <div className="col-span-2">
                       <Label htmlFor={`price-${index}`} className="text-sm mb-1 block">Unit Price</Label>

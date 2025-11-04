@@ -149,7 +149,7 @@ Message:
 ${contactFormData.message}
 
 ---
-This email was sent from the InventoryPath contact form.
+This email was sent from the Inventory Migrator contact form.
       `.trim();
 
       // Send email to admin using Web3Forms
@@ -162,7 +162,7 @@ This email was sent from the InventoryPath contact form.
           body: JSON.stringify({
             access_key: WEB3FORMS_ACCESS_KEY,
             subject: `New Contact Form Submission from ${contactFormData.fullName}`,
-            from_name: 'InventoryPath Contact Form',
+            from_name: 'Inventory Migrator Contact Form',
             email: ADMIN_EMAIL,
             message: adminEmailBody,
             replyto: contactFormData.email,
@@ -196,7 +196,7 @@ ${contactFormData.message}
 Our team will review your inquiry and contact you at the earliest convenience.
 
 Best regards,
-InventoryPath Team
+Inventory Migrator Team
         `.trim();
 
         const userEmailResponse = await fetch('https://api.web3forms.com/submit', {
@@ -206,8 +206,8 @@ InventoryPath Team
           },
           body: JSON.stringify({
             access_key: WEB3FORMS_ACCESS_KEY,
-            subject: 'Thank You for Contacting Us - InventoryPath',
-            from_name: 'InventoryPath',
+            subject: 'Thank You for Contacting Us - Inventory Migrator',
+            from_name: 'Inventory Migrator',
             email: contactFormData.email,
             message: userConfirmationBody,
           }),
@@ -433,7 +433,7 @@ InventoryPath Team
                   </div>
                   <div className="text-center">
                     <CardTitle className="text-4xl font-black bg-gradient-to-r from-white via-primary to-blue-400 bg-clip-text text-transparent mb-3">
-                      InventoryPath
+                      Inventory Migrator
                     </CardTitle>
                     <div className="flex items-center justify-center gap-2 mt-3">
                       <Sparkles className="h-5 w-5 text-primary animate-pulse" />
