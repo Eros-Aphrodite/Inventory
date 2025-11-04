@@ -265,12 +265,12 @@ const Landing = () => {
               <Star className="h-4 w-4 text-yellow-400 fill-yellow-400" />
             </div>
             
-            <h1 className="text-6xl md:text-7xl lg:text-8xl font-black text-white leading-[1.1] tracking-tight">
+            <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-white leading-[1.1] tracking-tight">
               Streamline Your
               <span className="block shimmer-text mt-2">Inventory Management</span>
             </h1>
             
-            <p className="text-2xl md:text-3xl text-white/70 leading-relaxed max-w-2xl font-light">
+            <p className="text-xl md:text-2xl text-white/70 leading-relaxed max-w-2xl font-light">
               Powerful, intuitive inventory management system with <span className="text-primary font-semibold">GST compliance</span>, multi-company support, and comprehensive reporting.
             </p>
 
@@ -299,7 +299,7 @@ const Landing = () => {
               <Button
                 onClick={handleSupport}
                 size="lg"
-                className="relative overflow-hidden group bg-gradient-to-r from-primary via-blue-500 to-purple-600 hover:from-primary/90 hover:via-blue-600 hover:to-purple-700 text-white text-xl px-10 py-8 h-auto shadow-2xl hover:shadow-primary/50 transition-all duration-500 font-bold hover:scale-105"
+                className="relative overflow-hidden group bg-gradient-to-r from-primary via-blue-500 to-purple-600 hover:from-primary/90 hover:via-blue-600 hover:to-purple-700 text-white text-lg px-10 py-8 h-auto shadow-2xl hover:shadow-primary/50 transition-all duration-500 font-bold hover:scale-105"
               >
                 <span className="relative z-10 flex items-center gap-3">
                   Start Free Trial
@@ -311,7 +311,7 @@ const Landing = () => {
                 onClick={handleSupport}
                 size="lg"
                 variant="outline"
-                className="border-2 border-white/30 hover:border-primary/60 bg-white/5 hover:bg-white/15 text-white text-xl px-10 py-8 h-auto backdrop-blur-xl font-bold hover:scale-105 transition-all duration-500"
+                className="border-2 border-white/30 hover:border-primary/60 bg-white/5 hover:bg-white/15 text-white text-lg px-10 py-8 h-auto backdrop-blur-xl font-bold hover:scale-105 transition-all duration-500"
               >
                 Schedule Demo
               </Button>
@@ -420,13 +420,13 @@ const Landing = () => {
             <Zap className="h-5 w-5 mr-2" />
             Powerful Features
           </Button>
-          <h2 className="text-5xl md:text-6xl lg:text-7xl font-black text-white mb-8 leading-tight">
+          <h2 className="text-3xl md:text-4xl lg:text-5xl font-black text-white mb-8 leading-tight">
             Everything You Need to
             <span className="block bg-gradient-to-r from-primary via-blue-400 to-purple-400 bg-clip-text text-transparent mt-2">
               Manage Your Inventory
             </span>
           </h2>
-          <p className="text-2xl text-white/70 max-w-3xl mx-auto font-light">
+          <p className="text-xl text-white/70 max-w-3xl mx-auto font-light">
             Comprehensive inventory management solution with advanced features for modern businesses.
           </p>
         </div>
@@ -464,7 +464,7 @@ const Landing = () => {
       {/* Ultra-Premium How It Works */}
       <section id="how-it-works" className="relative z-10 container mx-auto px-4 sm:px-6 lg:px-8 py-32">
         <div className="text-center mb-20">
-          <h2 className="text-5xl md:text-6xl font-black text-white mb-8 leading-tight">
+          <h2 className="text-3xl md:text-4xl font-black text-white mb-8 leading-tight">
             Get Started in
             <span className="block bg-gradient-to-r from-primary via-blue-400 to-purple-400 bg-clip-text text-transparent mt-2">
               Three Simple Steps
@@ -484,7 +484,7 @@ const Landing = () => {
                 <div className={`bg-gradient-to-br ${index === 0 ? 'from-blue-500 to-cyan-500' : index === 1 ? 'from-green-500 to-emerald-500' : 'from-purple-500 to-pink-500'} p-6 rounded-3xl w-20 h-20 mx-auto mb-8 flex items-center justify-center group-hover:scale-110 group-hover:rotate-6 transition-all duration-500 shadow-2xl`}>
                   <step.icon className="h-10 w-10 text-white" />
                 </div>
-                <h3 className="text-2xl font-black text-white mb-4">{step.title}</h3>
+                <h3 className="text-xl font-black text-white mb-4">{step.title}</h3>
                 <p className="text-white/70 leading-relaxed">{step.desc}</p>
               </div>
               {index < 2 && (
@@ -505,18 +505,18 @@ const Landing = () => {
           <div className="absolute inset-0 bg-gradient-to-r from-primary/20 via-blue-500/20 to-purple-500/20 animate-pulse"></div>
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent animate-shimmer"></div>
           <div className="relative z-10 text-center">
-            <h2 className="text-5xl md:text-6xl font-black text-white mb-8 leading-tight">
+            <h2 className="text-3xl md:text-4xl font-black text-white mb-8 leading-tight">
               Ready to Transform Your
               <span className="block shimmer-text mt-2">Inventory Management?</span>
             </h2>
-            <p className="text-2xl text-white/80 mb-12 max-w-3xl mx-auto font-light">
+            <p className="text-xl text-white/80 mb-12 max-w-3xl mx-auto font-light">
               Join thousands of businesses using InventoryPath to streamline their inventory operations.
             </p>
             <div className="flex flex-col sm:flex-row gap-6 justify-center">
               <Button
                 onClick={handleSupport}
                 size="lg"
-                className="relative overflow-hidden group bg-gradient-to-r from-primary via-blue-500 to-purple-600 hover:from-primary/90 hover:via-blue-600 hover:to-purple-700 text-white text-xl px-12 py-9 h-auto shadow-2xl hover:shadow-primary/50 transition-all duration-500 font-black hover:scale-105"
+                className="relative overflow-hidden group bg-gradient-to-r from-primary via-blue-500 to-purple-600 hover:from-primary/90 hover:via-blue-600 hover:to-purple-700 text-white text-lg px-12 py-9 h-auto shadow-2xl hover:shadow-primary/50 transition-all duration-500 font-black hover:scale-105"
               >
                 <span className="relative z-10 flex items-center gap-3">
                   Get Started Today
@@ -528,7 +528,7 @@ const Landing = () => {
                 onClick={handleSignIn}
                 size="lg"
                 variant="outline"
-                className="border-2 border-white/30 hover:border-primary/60 bg-white/10 hover:bg-white/20 text-white text-xl px-12 py-9 h-auto backdrop-blur-xl font-black hover:scale-105 transition-all duration-500"
+                className="border-2 border-white/30 hover:border-primary/60 bg-white/10 hover:bg-white/20 text-white text-lg px-12 py-9 h-auto backdrop-blur-xl font-black hover:scale-105 transition-all duration-500"
               >
                 Login to Dashboard
               </Button>
