@@ -87,3 +87,4 @@ If emails are not being sent:
 - The recipient email is set to `retailmarketingpro1.0@gmail.com` by default
 
 
+
