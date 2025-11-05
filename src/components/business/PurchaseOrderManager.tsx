@@ -57,6 +57,7 @@ interface PurchaseOrderItem {
 interface Supplier {
   id: string;
   company_name: string;
+  state?: string;
 }
 
 interface Product {
@@ -92,8 +93,8 @@ export const PurchaseOrderManager = () => {
     expected_delivery_date: "",
     notes: ""
   });
-  const [showLowStockOnly, setShowLowStockOnly] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [companyState, setCompanyState] = useState('27'); // Default to Maharashtra
+  const [forceIGST, setForceIGST] = useState(false); // Manual IGST selection override
   const [newSupplierData, setNewSupplierData] = useState({
     company_name: "",
     contact_person: "",
@@ -183,7 +184,7 @@ export const PurchaseOrderManager = () => {
     try {
       let query = supabase
         .from('suppliers')
-        .select('id, company_name');
+        .select('id, company_name, state');
 
       // Filter by company if a company is selected
       if (selectedCompany?.company_name) {
@@ -198,6 +199,30 @@ export const PurchaseOrderManager = () => {
       console.error('Failed to load suppliers:', error);
     }
   };
+
+  // Fetch company state from profile
+  useEffect(() => {
+    const fetchCompanyState = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('business_entities')
+          .eq('id', user.id)
+          .single();
+
+        if (profileData?.business_entities?.[0]?.state) {
+          setCompanyState(profileData.business_entities[0].state);
+        }
+      } catch (error) {
+        console.error('Failed to fetch company state:', error);
+      }
+    };
+
+    fetchCompanyState();
+  }, [selectedCompany]);
 
   const fetchProducts = async () => {
     try {
@@ -275,18 +300,39 @@ export const PurchaseOrderManager = () => {
   const calculateTotals = () => {
     let subtotal = 0;
     let taxAmount = 0;
+    let cgst = 0;
+    let sgst = 0;
+    let igst = 0;
 
     lineItems.forEach(item => {
       const lineTotal = item.quantity * item.unit_price;
       subtotal += lineTotal;
-      const gstCalc = calculateGST(lineTotal, item.gst_rate);
-      taxAmount += gstCalc.totalTax;
+      
+      // Calculate GST based on forceIGST flag or state difference
+      const supplierState = formData.supplier_id ? 
+        (suppliers.find(s => s.id === formData.supplier_id)?.state || '27') : '27';
+      const isInterState = forceIGST || (supplierState !== companyState && supplierState && companyState);
+      
+      const gstAmount = (lineTotal * item.gst_rate) / 100;
+      taxAmount += gstAmount;
+      
+      if (isInterState) {
+        // Inter-state: full tax is IGST
+        igst += gstAmount;
+      } else {
+        // Intra-state: split between CGST and SGST
+        cgst += gstAmount / 2;
+        sgst += gstAmount / 2;
+      }
     });
 
     return {
       subtotal,
       taxAmount,
-      total: subtotal + taxAmount
+      total: subtotal + taxAmount,
+      cgst,
+      sgst,
+      igst
     };
   };
 
@@ -329,7 +375,10 @@ export const PurchaseOrderManager = () => {
         .select()
         .single();
 
-      if (poError) throw poError;
+      if (poError) {
+        console.error('PO creation error:', poError);
+        throw poError;
+      }
 
       // Create purchase order items
       const itemsToInsert = lineItems.map(item => ({
@@ -346,7 +395,10 @@ export const PurchaseOrderManager = () => {
         .from('purchase_order_items')
         .insert(itemsToInsert);
 
-      if (itemsError) throw itemsError;
+      if (itemsError) {
+        console.error('PO items creation error:', itemsError);
+        throw itemsError;
+      }
 
       // Do not change inventory on PO creation; update happens on receiving
 
@@ -356,10 +408,12 @@ export const PurchaseOrderManager = () => {
       fetchPurchaseOrders();
 
       // No attachments to upload
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Purchase order creation error:', error);
+      const errorMessage = error?.message || error?.details || 'Failed to create purchase order';
       toast({
         title: "Error",
-        description: "Failed to create purchase order",
+        description: errorMessage,
         variant: "destructive"
       });
     }
@@ -542,6 +596,7 @@ Total: ${formatIndianCurrency(po.total_amount)}`;
       unit_price: 0,
       gst_rate: 18
     }]);
+    setForceIGST(false);
     setOpen(false);
   };
 
@@ -706,6 +761,20 @@ Total: ${formatIndianCurrency(po.total_amount)}`;
                 </div>
               </div>
 
+              {/* IGST Override Option */}
+              <div className="flex items-center space-x-2 p-3 border rounded-md bg-muted/50">
+                <input
+                  type="checkbox"
+                  id="forceIGST"
+                  checked={forceIGST}
+                  onChange={(e) => setForceIGST(e.target.checked)}
+                  className="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary cursor-pointer"
+                />
+                <Label htmlFor="forceIGST" className="font-normal cursor-pointer text-sm">
+                  Force IGST (Apply full tax % as IGST regardless of state)
+                </Label>
+              </div>
+
               <div>
                 <div className="flex justify-between items-center mb-4">
                   <Label>Order Items</Label>
@@ -727,51 +796,6 @@ Total: ${formatIndianCurrency(po.total_amount)}`;
                           <SelectItem value="__manual__">Manual Entry</SelectItem>
                           {(() => {
                             let filteredProducts = products;
-                            
-                            // Apply category filter
-                            if (selectedCategory !== "all") {
-                              filteredProducts = filteredProducts.filter(p => {
-                                const categoryMap: Record<string, string> = {
-                                  '10': 'Food & Beverages',
-                                  '15': 'Oils & Fats',
-                                  '17': 'Sugar & Confectionery',
-                                  '25': 'Cement & Construction',
-                                  '30': 'Pharmaceuticals',
-                                  '52': 'Cotton & Textiles',
-                                  '60': 'Textiles',
-                                  '72': 'Iron & Steel',
-                                  '85': 'Electronics',
-                                  '87': 'Vehicles'
-                                };
-                                if (p.hsn_code) {
-                                  const hsnPrefix = p.hsn_code.substring(0, 2);
-                                  if (categoryMap[hsnPrefix] === selectedCategory) {
-                                    return true;
-                                  }
-                                }
-                                if (p.description) {
-                                  const desc = p.description.toLowerCase();
-                                  const categoryLower = selectedCategory.toLowerCase();
-                                  if (categoryLower.includes('metal') || categoryLower.includes('steel')) {
-                                    return desc.includes('steel') || desc.includes('iron') || desc.includes('metal');
-                                  } else if (categoryLower.includes('construction')) {
-                                    return desc.includes('cement') || desc.includes('construction') || desc.includes('building');
-                                  } else if (categoryLower.includes('electronic')) {
-                                    return desc.includes('electronic') || desc.includes('mobile') || desc.includes('phone');
-                                  } else if (categoryLower.includes('textile')) {
-                                    return desc.includes('textile') || desc.includes('fabric') || desc.includes('cloth');
-                                  } else if (categoryLower.includes('food')) {
-                                    return desc.includes('food') || desc.includes('grocery');
-                                  }
-                                }
-                                return false;
-                              });
-                            }
-                            
-                            // Apply low stock filter
-                            if (showLowStockOnly) {
-                              filteredProducts = filteredProducts.filter(p => (p.current_stock || 0) <= (p.min_stock_level || 0));
-                            }
                             
                             return filteredProducts.map((product) => (
                               <SelectItem key={product.id} value={product.id}>
@@ -865,76 +889,6 @@ Total: ${formatIndianCurrency(po.total_amount)}`;
                 </div>
               </div>
 
-              {/* Low-stock helper */}
-              <div className="border rounded-lg p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <Label>Inventory Helper</Label>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={showLowStockOnly}
-                      onChange={(e) => setShowLowStockOnly(e.target.checked)}
-                    />
-                    Show low-stock products only
-                  </label>
-                </div>
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  <div>
-                    <Label htmlFor="po-product-category" className="text-sm mb-1 block">Category</Label>
-                    <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-                      <SelectTrigger id="po-product-category" className="w-full">
-                        <SelectValue placeholder="All Categories" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Categories</SelectItem>
-                        {(() => {
-                          const categories = new Set<string>();
-                          products.forEach(p => {
-                            if (p.hsn_code) {
-                              const hsnPrefix = p.hsn_code.substring(0, 2);
-                              const categoryMap: Record<string, string> = {
-                                '10': 'Food & Beverages',
-                                '15': 'Oils & Fats',
-                                '17': 'Sugar & Confectionery',
-                                '25': 'Cement & Construction',
-                                '30': 'Pharmaceuticals',
-                                '52': 'Cotton & Textiles',
-                                '60': 'Textiles',
-                                '72': 'Iron & Steel',
-                                '85': 'Electronics',
-                                '87': 'Vehicles'
-                              };
-                              if (categoryMap[hsnPrefix]) {
-                                categories.add(categoryMap[hsnPrefix]);
-                              }
-                            }
-                            if (p.description) {
-                              const desc = p.description.toLowerCase();
-                              if (desc.includes('steel') || desc.includes('iron') || desc.includes('metal')) {
-                                categories.add('Metals & Steel');
-                              } else if (desc.includes('cement') || desc.includes('construction') || desc.includes('building')) {
-                                categories.add('Construction Materials');
-                              } else if (desc.includes('electronic') || desc.includes('mobile') || desc.includes('phone')) {
-                                categories.add('Electronics');
-                              } else if (desc.includes('textile') || desc.includes('fabric') || desc.includes('cloth')) {
-                                categories.add('Textiles');
-                              } else if (desc.includes('food') || desc.includes('grocery')) {
-                                categories.add('Food & Beverages');
-                              }
-                            }
-                          });
-                          return Array.from(categories).sort().map(cat => (
-                            <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                          ));
-                        })()}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="text-xs text-muted-foreground mt-2">
-                  Select products below to auto-fill item details. Low-stock uses current_stock ≤ min_stock_level.
-                </div>
-              </div>
 
               <div>
                 <Label htmlFor="notes">Notes</Label>

@@ -61,16 +61,13 @@ export const POReceivingManager: React.FC<POReceivingManagerProps> = ({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectAll, setSelectAll] = useState(false);
+  const [forceIGST, setForceIGST] = useState(false); // Manual IGST selection override
   const [gstConfig, setGstConfig] = useState<GSTConfig>({
     fromState: '27', // Maharashtra (default)
     toState: '27',
     isInterState: false
   });
   const { toast } = useToast();
-
-  useEffect(() => {
-    fetchPOItems();
-  }, [po.id]);
 
   const fetchPOItems = async () => {
     try {
@@ -102,6 +99,62 @@ export const POReceivingManager: React.FC<POReceivingManagerProps> = ({
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchPOItems();
+  }, [po.id]);
+
+  // Initialize GST config from PO supplier state and company state
+  useEffect(() => {
+    const initializeGSTConfig = async () => {
+      let fromState = '27';
+      let toState = '27';
+      
+      // Get supplier state from PO
+      if (po.suppliers?.state) {
+        fromState = po.suppliers.state;
+      }
+      
+      // Fetch company state from profile
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const { data: profileData } = await supabase
+            .from('profiles')
+            .select('business_entities')
+            .eq('id', user.id)
+            .single();
+
+          if (profileData?.business_entities?.[0]?.state) {
+            toState = profileData.business_entities[0].state;
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch company state:', error);
+      }
+      
+      // Update GST config
+      setGstConfig(prev => {
+        const isInterState = forceIGST || (fromState !== toState && fromState && toState);
+        return {
+          fromState,
+          toState,
+          isInterState: prev.isInterState || isInterState
+        };
+      });
+    };
+    
+    initializeGSTConfig();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [po.suppliers?.state]);
+
+  // Update isInterState when forceIGST changes
+  useEffect(() => {
+    setGstConfig(prev => ({
+      ...prev,
+      isInterState: forceIGST || (prev.fromState !== prev.toState && prev.fromState && prev.toState)
+    }));
+  }, [forceIGST]);
 
   const updateReceivingQuantity = (itemId: string, quantity: number) => {
     const item = poItems.find(i => i.id === itemId);
@@ -180,7 +233,10 @@ export const POReceivingManager: React.FC<POReceivingManagerProps> = ({
           .update({ received_quantity: newReceivedQuantity })
           .eq('id', item.id);
 
-        if (updateError) throw updateError;
+        if (updateError) {
+          console.error('Error updating PO item:', updateError);
+          throw new Error(`Failed to update item "${item.description}": ${updateError.message || 'Unknown error'}`);
+        }
 
         // Update inventory if product exists
         if (item.product_id && item.product) {
@@ -191,7 +247,10 @@ export const POReceivingManager: React.FC<POReceivingManagerProps> = ({
             .update({ current_stock: newStock })
             .eq('id', item.product_id);
 
-          if (inventoryError) throw inventoryError;
+          if (inventoryError) {
+            console.error('Error updating inventory:', inventoryError);
+            throw new Error(`Failed to update inventory for "${item.description}": ${inventoryError.message || 'Unknown error'}`);
+          }
         }
       }
 
@@ -207,7 +266,10 @@ export const POReceivingManager: React.FC<POReceivingManagerProps> = ({
           .update({ status: 'received' })
           .eq('id', po.id);
 
-        if (statusError) throw statusError;
+        if (statusError) {
+          console.error('Error updating PO status:', statusError);
+          throw new Error(`Failed to update PO status: ${statusError.message || 'Unknown error'}`);
+        }
       } else {
         // Update to partial if some items received
         const { error: statusError } = await supabase
@@ -215,7 +277,10 @@ export const POReceivingManager: React.FC<POReceivingManagerProps> = ({
           .update({ status: 'partial' })
           .eq('id', po.id);
 
-        if (statusError) throw statusError;
+        if (statusError) {
+          console.error('Error updating PO status:', statusError);
+          throw new Error(`Failed to update PO status: ${statusError.message || 'Unknown error'}`);
+        }
       }
 
       toast({
@@ -225,10 +290,12 @@ export const POReceivingManager: React.FC<POReceivingManagerProps> = ({
 
       onInventoryUpdated();
       onClose();
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error updating inventory and receipt:', error);
+      const errorMessage = error?.message || error?.details || 'Failed to update inventory and receipt';
       toast({
         title: "Error",
-        description: "Failed to update inventory and receipt",
+        description: errorMessage,
         variant: "destructive"
       });
     } finally {
@@ -322,13 +389,20 @@ export const POReceivingManager: React.FC<POReceivingManagerProps> = ({
             <CardHeader>
               <CardTitle className="text-lg">GST Configuration</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label>From State (Supplier)</Label>
                   <Input
                     value={gstConfig.fromState}
-                    onChange={(e) => setGstConfig(prev => ({ ...prev, fromState: e.target.value }))}
+                    onChange={(e) => {
+                      const newFromState = e.target.value;
+                      setGstConfig(prev => ({ 
+                        ...prev, 
+                        fromState: newFromState,
+                        isInterState: forceIGST || (newFromState !== prev.toState && newFromState && prev.toState)
+                      }));
+                    }}
                     placeholder="State code"
                   />
                 </div>
@@ -336,16 +410,41 @@ export const POReceivingManager: React.FC<POReceivingManagerProps> = ({
                   <Label>To State (Your Company)</Label>
                   <Input
                     value={gstConfig.toState}
-                    onChange={(e) => setGstConfig(prev => ({ 
-                      ...prev, 
-                      toState: e.target.value,
-                      isInterState: e.target.value !== prev.fromState
-                    }))}
+                    onChange={(e) => {
+                      const newToState = e.target.value;
+                      setGstConfig(prev => ({ 
+                        ...prev, 
+                        toState: newToState,
+                        isInterState: forceIGST || (prev.fromState !== newToState && prev.fromState && newToState)
+                      }));
+                    }}
                     placeholder="State code"
                   />
                 </div>
               </div>
-              <p className="text-sm text-muted-foreground mt-2">
+              
+              {/* IGST Override Option */}
+              <div className="flex items-center space-x-2 p-3 border rounded-md bg-muted/50">
+                <input
+                  type="checkbox"
+                  id="forceIGST"
+                  checked={forceIGST}
+                  onChange={(e) => {
+                    const newForceIGST = e.target.checked;
+                    setForceIGST(newForceIGST);
+                    setGstConfig(prev => ({ 
+                      ...prev, 
+                      isInterState: newForceIGST || (prev.fromState !== prev.toState && prev.fromState && prev.toState)
+                    }));
+                  }}
+                  className="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary cursor-pointer"
+                />
+                <Label htmlFor="forceIGST" className="font-normal cursor-pointer text-sm">
+                  Force IGST (Apply full tax % as IGST regardless of state)
+                </Label>
+              </div>
+              
+              <p className="text-sm text-muted-foreground">
                 {gstConfig.isInterState ? 'Inter-state transaction (IGST applies)' : 'Intra-state transaction (CGST + SGST applies)'}
               </p>
             </CardContent>

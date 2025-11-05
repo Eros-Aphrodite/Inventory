@@ -213,24 +213,42 @@ export class GSTSyncService {
   /**
    * Get entity details for GST calculation
    */
-  static async getEntityDetails(entityId: string, entityType: 'supplier' | 'customer' | 'wholesaler' | 'transport' | 'labour') {
+  static async getEntityDetails(entityId: string, entityType: 'supplier' | 'customer' | 'wholesaler' | 'transport' | 'labour' | 'other') {
     try {
+      // For 'other' type, return default values if no entity_id
+      if (entityType === 'other' && !entityId) {
+        return {
+          company_name: 'Miscellaneous',
+          name: 'Miscellaneous',
+          state: '27' // Default state
+        };
+      }
+      
       // Check if it's a business entity type
-      const isBusinessEntity = ['wholesaler', 'transport', 'labour'].includes(entityType);
+      const isBusinessEntity = ['wholesaler', 'transport', 'labour', 'other'].includes(entityType);
       
       if (isBusinessEntity) {
-        const { data, error } = await supabase
-          .from('business_entities')
-          .select('name, entity_type, state')
-          .eq('id', entityId)
-          .single();
+        // For 'other' type with entity_id, try to find in business_entities
+        if (entityId) {
+          const { data, error } = await supabase
+            .from('business_entities')
+            .select('name, entity_type, state')
+            .eq('id', entityId)
+            .single();
 
-        if (error) throw error;
-        // Return with company_name for compatibility
+          if (!error && data) {
+            return {
+              company_name: data.name,
+              name: data.name,
+              state: data.state || '27'
+            };
+          }
+        }
+        // Fallback for 'other' type without entity_id or not found
         return {
-          company_name: data.name,
-          name: data.name,
-          state: data.state
+          company_name: 'Miscellaneous',
+          name: 'Miscellaneous',
+          state: '27'
         };
       } else {
         // For suppliers or customers

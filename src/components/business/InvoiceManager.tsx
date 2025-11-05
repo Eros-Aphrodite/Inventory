@@ -171,9 +171,7 @@ export const InvoiceManager = () => {
   }]);
   const [companyState, setCompanyState] = useState('27'); // Default to Maharashtra
   const [forceIGST, setForceIGST] = useState(false); // Manual IGST selection override
-  const [showLowStockOnly, setShowLowStockOnly] = useState(false);
   const [productSearch, setProductSearch] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [showAddProductDialog, setShowAddProductDialog] = useState(false);
   const [pendingProductItem, setPendingProductItem] = useState<{
     index: number;
@@ -518,7 +516,34 @@ export const InvoiceManager = () => {
         return;
       }
 
+      // Filter valid line items (must have description and quantity > 0)
+      const validLineItems = lineItems.filter(item => 
+        item.description && item.description.trim() !== '' && item.quantity > 0
+      );
+
+      // Validate that we have at least one valid line item
+      if (validLineItems.length === 0) {
+        toast({
+          title: "Validation Error",
+          description: "Please add at least one item with description and quantity greater than 0",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // Calculate totals using valid line items only
       const totals = calculateTotals();
+      
+      // Validate totals are valid
+      if (isNaN(totals.subtotal) || isNaN(totals.taxAmount) || isNaN(totals.total)) {
+        toast({
+          title: "Validation Error",
+          description: "Invalid totals calculated. Please check your line items.",
+          variant: "destructive"
+        });
+        return;
+      }
+
       let invoiceNumber = formData.custom_invoice_number || generateInvoiceNumber();
 
       // If user provided a custom invoice number, validate it isn't already used for this user
@@ -541,6 +566,16 @@ export const InvoiceManager = () => {
         }
       }
 
+      // Validate company is selected
+      if (!selectedCompany?.company_name) {
+        toast({
+          title: "Validation Error",
+          description: "Please select a company before creating an invoice",
+          variant: "destructive"
+        });
+        return;
+      }
+
       // Create invoice
       let invoice: any;
       const { data: invoiceData, error: invoiceError } = await supabase
@@ -559,53 +594,66 @@ export const InvoiceManager = () => {
           total_amount: totals.total,
           notes: formData.notes || null,
           user_id: user.id,
-          company_id: selectedCompany?.company_name || null
+          company_id: selectedCompany.company_name
         }])
         .select()
         .single();
 
       // Handle duplicate error from DB (race condition). If auto-generated, regenerate and retry once.
-      if (invoiceError && (invoiceError as any).code === '23505') {
-        if (!formData.custom_invoice_number) {
-          invoiceNumber = generateInvoiceNumber();
-          const retry = await supabase
-            .from('invoices')
-            .insert([{ 
-              invoice_number: invoiceNumber,
-              custom_invoice_number: formData.custom_invoice_number || null,
-              entity_id: formData.entity_id || null,
-              entity_type: formData.entity_type,
-              invoice_type: formData.invoice_type,
-              payment_status: formData.payment_status,
-              invoice_date: formData.invoice_date,
-              due_date: formData.due_date || null,
-              subtotal: totals.subtotal,
-              tax_amount: totals.taxAmount,
-              total_amount: totals.total,
-              notes: formData.notes || null,
-              user_id: user.id,
-              company_id: selectedCompany?.company_name || null
-            }])
-            .select()
-            .single();
+      if (invoiceError) {
+        if ((invoiceError as any).code === '23505') {
+          // Duplicate invoice number error
+          if (!formData.custom_invoice_number) {
+            invoiceNumber = generateInvoiceNumber();
+            const retry = await supabase
+              .from('invoices')
+              .insert([{ 
+                invoice_number: invoiceNumber,
+                custom_invoice_number: formData.custom_invoice_number || null,
+                entity_id: formData.entity_id || null,
+                entity_type: formData.entity_type,
+                invoice_type: formData.invoice_type,
+                payment_status: formData.payment_status,
+                invoice_date: formData.invoice_date,
+                due_date: formData.due_date || null,
+                subtotal: totals.subtotal,
+                tax_amount: totals.taxAmount,
+                total_amount: totals.total,
+                notes: formData.notes || null,
+                user_id: user.id,
+                company_id: selectedCompany.company_name
+              }])
+              .select()
+              .single();
 
-          if (retry.error) throw retry.error;
-          // Overwrite invoice with retry data
-          invoice = retry.data as any;
+            if (retry.error) {
+              console.error('Retry invoice creation error:', retry.error);
+              throw retry.error;
+            }
+            // Overwrite invoice with retry data
+            invoice = retry.data as any;
+          } else {
+            // Custom numbers should not auto-resolve; show friendly message
+            toast({
+              title: "Duplicate Invoice Number",
+              description: "This invoice number already exists. Please enter a different number.",
+              variant: "destructive"
+            });
+            return;
+          }
         } else {
-          // Custom numbers should not auto-resolve; show friendly message
-          toast({
-            title: "Duplicate Invoice Number",
-            description: "This invoice number already exists. Please enter a different number.",
-            variant: "destructive"
-          });
-          return;
+          // Other database errors
+          console.error('Invoice creation error:', invoiceError);
+          throw invoiceError;
         }
-      } else if (invoiceError) {
-        throw invoiceError;
       } else {
         // Assign invoice data when there's no error
         invoice = invoiceData;
+      }
+
+      // Validate invoice was created
+      if (!invoice || !invoice.id) {
+        throw new Error('Invoice was created but no ID was returned');
       }
 
       // Create invoice items (include product_id for inventory tracking)
@@ -624,16 +672,25 @@ export const InvoiceManager = () => {
         .from('invoice_items')
         .insert(itemsToInsert);
 
-      if (itemsError) throw itemsError;
+      if (itemsError) {
+        console.error('Error creating invoice items:', itemsError);
+        throw new Error(`Failed to create invoice items: ${itemsError.message || 'Unknown error'}`);
+      }
 
       // Update inventory based on invoice type
-      // IMPORTANT: Only update inventory for CUSTOMER invoices (entity_type === 'customer')
+      // IMPORTANT: Update inventory for:
+      // - Customer invoices (sales, sale_return) when entity_type === 'customer'
+      // - Supplier invoices (purchase, purchase_return) when entity_type === 'supplier'
       // Transport, wholesale, labour, and other categories don't need inventory sync
       let inventoryUpdatesSuccess = 0;
       let inventoryUpdatesFailed = 0;
       
-      // Only update inventory if this is a customer invoice
-      if (formData.entity_type === 'customer') {
+      // Update inventory for customer invoices (sales/sale_return) or supplier invoices (purchase/purchase_return)
+      const shouldUpdateInventory = 
+        (formData.entity_type === 'customer' && (formData.invoice_type === 'sales' || formData.invoice_type === 'sale_return')) ||
+        (formData.entity_type === 'supplier' && (formData.invoice_type === 'purchase' || formData.invoice_type === 'purchase_return'));
+      
+      if (shouldUpdateInventory) {
         for (const item of validLineItems) {
           try {
             let productId: string | undefined = item.product_id;
@@ -740,7 +797,7 @@ export const InvoiceManager = () => {
           }
         }
         
-        // Show summary if there were any updates (only for customer invoices)
+        // Show summary if there were any updates
         if (inventoryUpdatesSuccess > 0) {
           toast({
             title: "Inventory Updated",
@@ -748,11 +805,11 @@ export const InvoiceManager = () => {
           });
         }
       } else {
-        // For non-customer invoices (transport, wholesale, labour, other), skip inventory updates
-        console.log(`ℹ️ Skipping inventory update for ${formData.entity_type} invoice - inventory sync only applies to customers`);
+        // For non-inventory invoices (transport, wholesale, labour, other), skip inventory updates
+        console.log(`ℹ️ Skipping inventory update for ${formData.entity_type} invoice (${formData.invoice_type}) - inventory sync only applies to customer/supplier invoices`);
       }
 
-      // Create GST entry automatically
+      // Create GST entry automatically (for all invoice types including returns)
       try {
         // Get entity details for GST calculation
         const entityDetails = await GSTSyncService.getEntityDetails(
@@ -768,12 +825,13 @@ export const InvoiceManager = () => {
           gstTransactionType = formData.invoice_type === 'purchase_return' ? 'purchase_return' : 'purchase';
         }
 
+        // For return invoices, GST amounts should be negative to represent refund/credit
         const invoiceGSTData = {
           invoice_id: invoice.id,
           invoice_number: invoiceNumber,
           invoice_date: formData.invoice_date,
           transaction_type: gstTransactionType,
-          entity_name: entityDetails?.company_name || entityDetails?.name || 'Unknown',
+          entity_name: entityDetails?.company_name || entityDetails?.name || (formData.entity_type === 'other' ? 'Miscellaneous' : 'Unknown'),
           entity_id: formData.entity_id || '',
           subtotal: totals.subtotal,
           tax_amount: totals.taxAmount,
@@ -792,9 +850,10 @@ export const InvoiceManager = () => {
 
         const gstResult = await GSTSyncService.createGSTEntryFromInvoice(invoiceGSTData);
         if (gstResult.success) {
+          const isReturn = formData.invoice_type === 'sale_return' || formData.invoice_type === 'purchase_return';
           toast({ 
             title: "Success", 
-            description: "Invoice created and GST entry added successfully" 
+            description: `Invoice created${isReturn ? ' (return)' : ''} and GST entry ${isReturn ? 'refund' : ''} added successfully` 
           });
         } else {
           toast({ 
@@ -851,10 +910,12 @@ export const InvoiceManager = () => {
       
       resetForm();
       fetchInvoices();
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Invoice creation error:', error);
+      const errorMessage = error?.message || error?.details || error?.hint || 'Failed to create invoice';
       toast({
         title: "Error",
-        description: "Failed to create invoice",
+        description: errorMessage,
         variant: "destructive"
       });
     }
@@ -1718,98 +1779,6 @@ export const InvoiceManager = () => {
                     Add Item
                   </Button>
                 </div>
-                {/* Inventory Helper - Only show for customer invoices */}
-                {formData.entity_type === 'customer' && (
-                  <div className="border rounded-lg p-3 mb-3 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-sm">Inventory Helper</Label>
-                      <label className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          checked={showLowStockOnly}
-                          onChange={(e) => setShowLowStockOnly(e.target.checked)}
-                        />
-                        Show low-stock products only
-                      </label>
-                    </div>
-                    <div>
-                      <Label htmlFor="product-category" className="text-sm mb-1 block">Category</Label>
-                      <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-                        <SelectTrigger id="product-category" className="w-full">
-                          <SelectValue placeholder="All Categories" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Categories</SelectItem>
-                          {(() => {
-                            // Extract categories from HSN codes or descriptions
-                            const categories = new Set<string>();
-                            products.forEach(p => {
-                              if (p.hsn_code) {
-                                // Extract category from HSN code (first 2 digits)
-                                const hsnPrefix = p.hsn_code.substring(0, 2);
-                                const categoryMap: Record<string, string> = {
-                                  '10': 'Food & Beverages',
-                                  '15': 'Oils & Fats',
-                                  '17': 'Sugar & Confectionery',
-                                  '25': 'Cement & Construction',
-                                  '30': 'Pharmaceuticals',
-                                  '52': 'Cotton & Textiles',
-                                  '60': 'Textiles',
-                                  '72': 'Iron & Steel',
-                                  '85': 'Electronics',
-                                  '87': 'Vehicles'
-                                };
-                                if (categoryMap[hsnPrefix]) {
-                                  categories.add(categoryMap[hsnPrefix]);
-                                }
-                              }
-                              // Also extract from description if available
-                              if (p.description) {
-                                const desc = p.description.toLowerCase();
-                                if (desc.includes('steel') || desc.includes('iron') || desc.includes('metal')) {
-                                  categories.add('Metals & Steel');
-                                } else if (desc.includes('cement') || desc.includes('construction') || desc.includes('building')) {
-                                  categories.add('Construction Materials');
-                                } else if (desc.includes('electronic') || desc.includes('mobile') || desc.includes('phone')) {
-                                  categories.add('Electronics');
-                                } else if (desc.includes('textile') || desc.includes('fabric') || desc.includes('cloth')) {
-                                  categories.add('Textiles');
-                                } else if (desc.includes('food') || desc.includes('grocery')) {
-                                  categories.add('Food & Beverages');
-                                }
-                              }
-                            });
-                            return Array.from(categories).sort().map(cat => (
-                              <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-                            ));
-                          })()}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label htmlFor="product-search" className="text-sm mb-1 block">Search Products</Label>
-                      <Input
-                        id="product-search"
-                        type="text"
-                        placeholder="Type to search products by name, price, or stock..."
-                        value={productSearch}
-                        onChange={(e) => setProductSearch(e.target.value)}
-                        className="w-full"
-                      />
-                      {productSearch && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="mt-1 h-6 text-xs"
-                          onClick={() => setProductSearch("")}
-                        >
-                          Clear search
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                )}
                 
                 {/* Info message for non-customer invoices */}
                 {formData.entity_type !== 'customer' && (
@@ -1904,53 +1873,8 @@ export const InvoiceManager = () => {
                         >
                           <SelectItem value="__manual__">Manual Entry</SelectItem>
                           {(() => {
-                            // Filter products based on category, search and low stock filter
+                            // Filter products based on search term
                             let filteredProducts = products;
-                            
-                            // Apply category filter
-                            if (selectedCategory !== "all") {
-                              filteredProducts = filteredProducts.filter(p => {
-                                const categoryMap: Record<string, string> = {
-                                  '10': 'Food & Beverages',
-                                  '15': 'Oils & Fats',
-                                  '17': 'Sugar & Confectionery',
-                                  '25': 'Cement & Construction',
-                                  '30': 'Pharmaceuticals',
-                                  '52': 'Cotton & Textiles',
-                                  '60': 'Textiles',
-                                  '72': 'Iron & Steel',
-                                  '85': 'Electronics',
-                                  '87': 'Vehicles'
-                                };
-                                if (p.hsn_code) {
-                                  const hsnPrefix = p.hsn_code.substring(0, 2);
-                                  if (categoryMap[hsnPrefix] === selectedCategory) {
-                                    return true;
-                                  }
-                                }
-                                if (p.description) {
-                                  const desc = p.description.toLowerCase();
-                                  const categoryLower = selectedCategory.toLowerCase();
-                                  if (categoryLower.includes('metal') || categoryLower.includes('steel')) {
-                                    return desc.includes('steel') || desc.includes('iron') || desc.includes('metal');
-                                  } else if (categoryLower.includes('construction')) {
-                                    return desc.includes('cement') || desc.includes('construction') || desc.includes('building');
-                                  } else if (categoryLower.includes('electronic')) {
-                                    return desc.includes('electronic') || desc.includes('mobile') || desc.includes('phone');
-                                  } else if (categoryLower.includes('textile')) {
-                                    return desc.includes('textile') || desc.includes('fabric') || desc.includes('cloth');
-                                  } else if (categoryLower.includes('food')) {
-                                    return desc.includes('food') || desc.includes('grocery');
-                                  }
-                                }
-                                return false;
-                              });
-                            }
-                            
-                            // Apply low stock filter if enabled
-                            if (showLowStockOnly) {
-                              filteredProducts = filteredProducts.filter(p => (p.current_stock || 0) <= (p.min_stock_level || 0));
-                            }
                             
                             // Apply search filter if search term exists
                             if (productSearch.trim()) {

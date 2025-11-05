@@ -298,19 +298,30 @@ export const ReportsManager: React.FC = () => {
           // Fetch ledger entries for indirect income (income and expense ledgers)
           const { data: { user } } = await supabase.auth.getUser();
           
+          if (!user?.id) {
+            console.warn('No user ID found for ledger entries query');
+          }
+          
           // First get ledger IDs for the company
-          const { data: companyLedgers } = await supabase
+          const { data: companyLedgers, error: ledgersError } = await supabase
             .from('ledgers')
             .select('id, ledger_type')
             .eq('company_id', selectedCompany.company_name);
           
+          if (ledgersError) {
+            console.error('Error fetching ledgers for company:', ledgersError);
+          }
+          
           const ledgerIds = (companyLedgers || []).map(l => l.id);
           const ledgerTypeMap = new Map((companyLedgers || []).map(l => [l.id, l.ledger_type]));
           
+          console.log(`Found ${ledgerIds.length} ledgers for company ${selectedCompany.company_name}`);
+          
           // Then get ledger entries for those ledgers
+          // Use a join query to ensure we only get entries for ledgers that belong to this company
           let ledgerEntries: any[] = [];
           if (ledgerIds.length > 0 && user?.id) {
-            const { data: entriesData } = await supabase
+            const { data: entriesData, error: entriesError } = await supabase
               .from('ledger_entries')
               .select('debit_amount, credit_amount, ledger_id, entry_date')
               .in('ledger_id', ledgerIds)
@@ -318,22 +329,45 @@ export const ReportsManager: React.FC = () => {
               .gte('entry_date', dateFrom)
               .lte('entry_date', dateTo);
             
+            if (entriesError) {
+              console.error('Error fetching ledger entries:', entriesError);
+            } else {
+              console.log(`Found ${(entriesData || []).length} ledger entries in date range`);
+            }
+            
             // Add ledger type to each entry
+            // Note: The calculation below will handle filtering by ledger_type (income/expense)
             ledgerEntries = (entriesData || []).map(entry => ({
               ...entry,
               ledger_type: ledgerTypeMap.get(entry.ledger_id)
             }));
+          } else if (ledgerIds.length === 0) {
+            console.warn('No ledgers found for company, cannot fetch ledger entries');
+          } else if (!user?.id) {
+            console.warn('No user ID, cannot fetch ledger entries');
           }
 
-          // Calculate indirect income from ledgers (income ledgers - expense ledgers)
-          const ledgerIncome = (ledgerEntries || []).reduce((sum, entry) => {
+          // Calculate indirect income and expenses from ledgers separately
+          // Income ledgers: credit increases income, debit decreases income
+          // Expense ledgers: debit increases expense, credit decreases expense
+          const indirectIncome = (ledgerEntries || []).reduce((sum, entry) => {
             if (entry.ledger_type === 'income') {
-              return sum + (entry.credit_amount || 0) - (entry.debit_amount || 0);
-            } else if (entry.ledger_type === 'expense') {
-              return sum - ((entry.debit_amount || 0) - (entry.credit_amount || 0));
+              // For income: credit is income, debit is reversal/refund
+              return sum + ((entry.credit_amount || 0) - (entry.debit_amount || 0));
             }
             return sum;
           }, 0);
+          
+          const indirectExpensesFromLedgers = (ledgerEntries || []).reduce((sum, entry) => {
+            if (entry.ledger_type === 'expense') {
+              // For expenses: debit is expense, credit is reversal/refund
+              return sum + ((entry.debit_amount || 0) - (entry.credit_amount || 0));
+            }
+            return sum;
+          }, 0);
+          
+          // Total indirect expenses = labour + transport + ledger expenses
+          const totalIndirectExpenses = indirectExpenses + indirectExpensesFromLedgers;
 
           // Calculate cost of goods sold properly
           const effectiveCOGS = openingStockCost + totalPurchases - closingStock;
@@ -342,9 +376,10 @@ export const ReportsManager: React.FC = () => {
           const grossProfit = totalSales - effectiveCOGS;
           
           // Calculate net profit (with indirect income and expenses)
-          const netProfit = grossProfit - indirectExpenses + ledgerIncome - (purchaseTax - salesTax);
+          // Net Profit = Gross Profit - Indirect Expenses + Indirect Income - Tax Difference
+          const netProfit = grossProfit - totalIndirectExpenses + indirectIncome - (purchaseTax - salesTax);
 
-          console.log('Report totals - Sales:', totalSales, 'Purchases:', totalPurchases, 'Opening Stock:', openingStockCost, 'Closing Stock:', closingStock, 'COGS:', effectiveCOGS, 'Indirect Expenses:', indirectExpenses, 'Indirect Income:', ledgerIncome, 'Net Profit:', netProfit);
+          console.log('Report totals - Sales:', totalSales, 'Purchases:', totalPurchases, 'Opening Stock:', openingStockCost, 'Closing Stock:', closingStock, 'COGS:', effectiveCOGS, 'Indirect Expenses (invoices):', indirectExpenses, 'Indirect Expenses (ledgers):', indirectExpensesFromLedgers, 'Total Indirect Expenses:', totalIndirectExpenses, 'Indirect Income:', indirectIncome, 'Net Profit:', netProfit);
 
           sampleData = [
             { subcategory: 'Sales Account (All Sales Invoices)', amount: totalSales, category: 'Revenue' },
@@ -356,8 +391,9 @@ export const ReportsManager: React.FC = () => {
             { subcategory: '', amount: grossProfit, category: 'Gross Profit' },
             { subcategory: 'Labour Invoices (with Tax)', amount: labourExpenses, category: 'Indirect Expenses' },
             { subcategory: 'Transport Invoices (with Tax)', amount: transportExpenses, category: 'Indirect Expenses' },
-            { subcategory: 'Total Indirect Expenses', amount: indirectExpenses, category: 'Indirect Expenses' },
-            { subcategory: 'Indirect Income (Ledger)', amount: ledgerIncome, category: 'Indirect Income' },
+            { subcategory: 'Indirect Expenses (Ledger)', amount: indirectExpensesFromLedgers, category: 'Indirect Expenses' },
+            { subcategory: 'Total Indirect Expenses', amount: totalIndirectExpenses, category: 'Indirect Expenses' },
+            { subcategory: 'Indirect Income (Ledger)', amount: indirectIncome, category: 'Indirect Income' },
             { subcategory: 'Sales Tax Collected', amount: salesTax, category: 'Taxes' },
             { subcategory: 'Purchase Tax Paid', amount: purchaseTax, category: 'Taxes' },
             { subcategory: 'Total Inventory Selling Price (with Tax)', amount: totalInventorySellingWithTax, category: 'Net Profit' },
@@ -373,7 +409,7 @@ export const ReportsManager: React.FC = () => {
         }
         
         case 'sales-report': {
-          // Fetch all sales invoices
+          // Fetch all sales invoices (including miscellaneous invoices with entity_type='other')
           const { data: salesData, error: salesDataError } = await supabase
             .from('invoices')
             .select(`
@@ -384,6 +420,7 @@ export const ReportsManager: React.FC = () => {
               total_amount,
               payment_status,
               invoice_type,
+              entity_type,
               business_entities(name),
               suppliers(company_name)
             `)
@@ -415,23 +452,23 @@ export const ReportsManager: React.FC = () => {
             category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
             invoice_number: inv.invoice_number,
             invoice_date: inv.invoice_date,
-            customer: inv.business_entities?.name || inv.suppliers?.company_name || 'N/A',
+            customer: inv.business_entities?.name || inv.suppliers?.company_name || 'Miscellaneous',
             subtotal: inv.subtotal || 0,
             tax_amount: inv.tax_amount || 0,
             payment_status: inv.payment_status || 'due',
             invoice_type: 'sales'
           }));
 
-          // Map return sales (negative amounts)
+          // Map return sales (negative amounts to show refund/credit)
           const returnRows = saleReturns.map(inv => ({
             subcategory: inv.invoice_number || '',
-            amount: -(inv.total_amount || 0),
+            amount: -(inv.total_amount || 0), // Negative to show it's a return/refund
             category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
             invoice_number: inv.invoice_number,
             invoice_date: inv.invoice_date,
-            customer: inv.business_entities?.name || inv.suppliers?.company_name || 'N/A',
-            subtotal: -(inv.subtotal || 0),
-            tax_amount: -(inv.tax_amount || 0),
+            customer: inv.business_entities?.name || inv.suppliers?.company_name || 'Miscellaneous',
+            subtotal: -(inv.subtotal || 0), // Negative subtotal
+            tax_amount: -(inv.tax_amount || 0), // Negative tax (GST refund)
             payment_status: inv.payment_status || 'due',
             invoice_type: 'sale_return'
           }));
@@ -484,7 +521,7 @@ export const ReportsManager: React.FC = () => {
             console.error('Error fetching purchase orders:', poError);
           }
 
-          // Fetch purchase invoices
+          // Fetch purchase invoices (including miscellaneous invoices with entity_type='other')
           const { data: purchaseInvoices, error: invoiceError } = await supabase
             .from('invoices')
             .select(`
@@ -494,6 +531,7 @@ export const ReportsManager: React.FC = () => {
               tax_amount,
               total_amount,
               invoice_type,
+              entity_type,
               payment_status,
               suppliers(company_name),
               business_entities(name)
@@ -549,23 +587,23 @@ export const ReportsManager: React.FC = () => {
             category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
             invoice_number: inv.invoice_number,
             invoice_date: inv.invoice_date,
-            supplier: inv.suppliers?.company_name || inv.business_entities?.name || 'N/A',
+            supplier: inv.suppliers?.company_name || inv.business_entities?.name || 'Miscellaneous',
             subtotal: inv.subtotal || 0,
             tax_amount: inv.tax_amount || 0,
             payment_status: inv.payment_status || 'due',
             record_type: 'Purchase Invoice'
           }));
 
-          // Map purchase returns (negative amounts)
+          // Map purchase returns (negative amounts to show refund/credit)
           const returnInvoiceRows = purchaseReturns.map(inv => ({
             subcategory: inv.invoice_number || '',
-            amount: -(inv.total_amount || 0),
+            amount: -(inv.total_amount || 0), // Negative to show it's a return/refund
             category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
             invoice_number: inv.invoice_number,
             invoice_date: inv.invoice_date,
-            supplier: inv.suppliers?.company_name || inv.business_entities?.name || 'N/A',
-            subtotal: -(inv.subtotal || 0),
-            tax_amount: -(inv.tax_amount || 0),
+            supplier: inv.suppliers?.company_name || inv.business_entities?.name || 'Miscellaneous',
+            subtotal: -(inv.subtotal || 0), // Negative subtotal
+            tax_amount: -(inv.tax_amount || 0), // Negative tax (GST refund)
             payment_status: inv.payment_status || 'due',
             record_type: 'Purchase Return'
           }));
@@ -593,7 +631,7 @@ export const ReportsManager: React.FC = () => {
         }
 
         case 'invoice-aging': {
-          // Fetch invoices with due or partial payment status
+          // Fetch all sales invoices (including paid ones to check if payments were made)
           const { data: agingInvoices, error: agingError } = await supabase
             .from('invoices')
             .select(`
@@ -607,8 +645,7 @@ export const ReportsManager: React.FC = () => {
               suppliers(company_name)
             `)
             .eq('company_id', selectedCompany.company_name)
-            .eq('invoice_type', 'sales')
-            .in('payment_status', ['due', 'partial'])
+            .in('invoice_type', ['sales', 'sale_return'])
             .order('invoice_date', { ascending: false });
 
           if (agingError) {
@@ -620,23 +657,28 @@ export const ReportsManager: React.FC = () => {
             });
           }
 
-          // Fetch all payments for these invoices
+          // Fetch all payments for these invoices (including recent payments)
           const invoiceIds = (agingInvoices || []).map(inv => inv.id);
           let paymentsMap = new Map<string, number>();
           
           if (invoiceIds.length > 0) {
             const { data: { user } } = await supabase.auth.getUser();
             if (user?.id) {
-              const { data: paymentsData } = await supabase
+              const { data: paymentsData, error: paymentsError } = await supabase
                 .from('invoice_payments')
-                .select('invoice_id, amount')
+                .select('invoice_id, amount, payment_date')
                 .in('invoice_id', invoiceIds)
-                .eq('user_id', user.id);
+                .eq('user_id', user.id)
+                .order('payment_date', { ascending: false });
 
-              (paymentsData || []).forEach(payment => {
-                const current = paymentsMap.get(payment.invoice_id) || 0;
-                paymentsMap.set(payment.invoice_id, current + (payment.amount || 0));
-              });
+              if (paymentsError) {
+                console.error('Error fetching invoice payments:', paymentsError);
+              } else {
+                (paymentsData || []).forEach(payment => {
+                  const current = paymentsMap.get(payment.invoice_id) || 0;
+                  paymentsMap.set(payment.invoice_id, current + (payment.amount || 0));
+                });
+              }
             }
           }
 
@@ -847,12 +889,21 @@ export const ReportsManager: React.FC = () => {
         }
         
         case 'gst-report': {
-          const { data: { user } } = await supabase.auth.getUser();
-          
-          // Fetch all GST entries for the company (all invoice types: sale/purchase/return/refund)
-          let gstData: any[] = [];
-          
-          if (user?.id) {
+          try {
+            const { data: { user } } = await supabase.auth.getUser();
+            
+            if (!user?.id) {
+              toast({
+                title: "Error",
+                description: "User not authenticated",
+                variant: "destructive"
+              });
+              throw new Error('User not authenticated');
+            }
+            
+            // Fetch all GST entries for the company (all invoice types: sale/purchase/return/refund)
+            let gstData: any[] = [];
+            
             const { data, error } = await supabase
               .from('gst_entries')
               .select(`
@@ -877,15 +928,11 @@ export const ReportsManager: React.FC = () => {
             
             if (error) {
               console.error('Error fetching GST data:', error);
-              toast({
-                title: "Error",
-                description: "Failed to fetch GST data: " + error.message,
-                variant: "destructive"
-              });
+              throw error;
             } else {
               gstData = data || [];
+              console.log(`Found ${gstData.length} GST entries for company ${selectedCompany.company_name}`);
             }
-          }
 
           // Separate by transaction type
           const salesTransactions = (gstData || []).filter((g: any) => g.transaction_type === 'sale');
@@ -932,31 +979,64 @@ export const ReportsManager: React.FC = () => {
             total_gst: g.total_gst || 0
           }));
 
-          newSummary = {
-            totalSales: cgstTotal,
-            totalPurchases: sgstTotal,
-            grossProfit: igstTotal,
-            netProfit: totalGST
-          };
+            newSummary = {
+              totalSales: cgstTotal,
+              totalPurchases: sgstTotal,
+              grossProfit: igstTotal,
+              netProfit: totalGST
+            };
+          } catch (error: any) {
+            console.error('GST report error:', error);
+            toast({
+              title: "Error",
+              description: error?.message || "Failed to generate GST report",
+              variant: "destructive"
+            });
+            sampleData = [];
+            newSummary = {
+              totalSales: 0,
+              totalPurchases: 0,
+              grossProfit: 0,
+              netProfit: 0
+            };
+          }
           break;
         }
         
         case 'payment-report': {
-          const { data: { user } } = await supabase.auth.getUser();
-          
-          // Fetch payable ledgers (accounts payable)
-          const { data: payableLedgers } = await supabase
-            .from('ledgers')
-            .select('id, name, current_balance, opening_balance')
-            .eq('company_id', selectedCompany.company_name)
-            .eq('ledger_type', 'payables');
+          try {
+            const { data: { user } } = await supabase.auth.getUser();
+            
+            if (!user?.id) {
+              toast({
+                title: "Error",
+                description: "User not authenticated",
+                variant: "destructive"
+              });
+              throw new Error('User not authenticated');
+            }
+            
+            // Fetch payable ledgers (accounts payable)
+            const { data: payableLedgers, error: payableError } = await supabase
+              .from('ledgers')
+              .select('id, name, current_balance, opening_balance')
+              .eq('company_id', selectedCompany.company_name)
+              .eq('ledger_type', 'payables');
 
-          // Fetch receivable ledgers (accounts receivable)
-          const { data: receivableLedgers } = await supabase
-            .from('ledgers')
-            .select('id, name, current_balance, opening_balance')
-            .eq('company_id', selectedCompany.company_name)
-            .eq('ledger_type', 'receivables');
+            if (payableError) {
+              console.error('Error fetching payable ledgers:', payableError);
+            }
+
+            // Fetch receivable ledgers (accounts receivable)
+            const { data: receivableLedgers, error: receivableError } = await supabase
+              .from('ledgers')
+              .select('id, name, current_balance, opening_balance')
+              .eq('company_id', selectedCompany.company_name)
+              .eq('ledger_type', 'receivables');
+
+            if (receivableError) {
+              console.error('Error fetching receivable ledgers:', receivableError);
+            }
 
           // Fetch ledger entries for payable and receivable ledgers
           const payableLedgerIds = (payableLedgers || []).map(l => l.id);
@@ -1052,12 +1132,28 @@ export const ReportsManager: React.FC = () => {
           const totalPurchases = regularPurchases.reduce((sum, inv) => sum + (inv.total_amount || 0), 0) -
                                 purchaseReturns.reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
 
-          newSummary = {
-            totalSales: totalReceivables,
-            totalPurchases: totalPayables + totalPurchases,
-            grossProfit: sampleData.length,
-            netProfit: totalReceivables - totalPayables - totalPurchases
-          };
+            newSummary = {
+              totalSales: totalReceivables,
+              totalPurchases: totalPayables + totalPurchases,
+              grossProfit: sampleData.length,
+              netProfit: totalReceivables - totalPayables - totalPurchases
+            };
+            console.log(`Payment report: ${sampleData.length} entries found`);
+          } catch (error: any) {
+            console.error('Payment report error:', error);
+            toast({
+              title: "Error",
+              description: error?.message || "Failed to generate payment report",
+              variant: "destructive"
+            });
+            sampleData = [];
+            newSummary = {
+              totalSales: 0,
+              totalPurchases: 0,
+              grossProfit: 0,
+              netProfit: 0
+            };
+          }
           break;
         }
         
@@ -1188,7 +1284,8 @@ export const ReportsManager: React.FC = () => {
         }
       }
 
-      setReportData(sampleData);
+      // Ensure data is set even if empty
+      setReportData(sampleData || []);
       setSummary(newSummary);
       setGeneratedTime(new Date().toLocaleString('en-IN', {
         day: '2-digit',
@@ -1202,6 +1299,14 @@ export const ReportsManager: React.FC = () => {
       
       const itemCount = sampleData.length;
       console.log(`Report generated successfully. Found ${itemCount} items for company ${selectedCompany.company_name} in date range ${dateFrom} to ${dateTo}`);
+      
+      if (itemCount === 0 && selectedReport !== 'profit-loss') {
+        toast({
+          title: "No Data Found",
+          description: `No data found for ${REPORT_TYPES.find(r => r.id === selectedReport)?.name || selectedReport} in the selected date range.`,
+          variant: "default"
+        });
+      }
       
       toast({
         title: "Success",

@@ -152,15 +152,41 @@ export const GSTTracker = () => {
 
       const { data, error } = await query;
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error fetching GST data:', error);
+        throw error;
+      }
       
       // Filter by entity type after fetching (since it's in the invoices table)
       let filteredData = data || [];
       if (entityType !== 'all') {
-        filteredData = filteredData.filter((entry: any) => 
-          entry.invoices?.entity_type === entityType
-        );
+        filteredData = filteredData.filter((entry: any) => {
+          const invoiceEntityType = entry.invoices?.entity_type;
+          const transactionType = entry.transaction_type;
+          
+          // For supplier filter, ensure transaction_type is purchase/purchase_return
+          // For customer filter, ensure transaction_type is sale/sale_return
+          if (entityType === 'supplier') {
+            const isSupplier = invoiceEntityType === 'supplier' && 
+                   (transactionType === 'purchase' || transactionType === 'purchase_return');
+            if (!isSupplier && invoiceEntityType === 'supplier') {
+              console.warn(`Supplier invoice ${entry.invoice_number} has incorrect transaction_type: ${transactionType} (expected purchase/purchase_return)`);
+            }
+            return isSupplier;
+          } else if (entityType === 'customer') {
+            const isCustomer = invoiceEntityType === 'customer' && 
+                   (transactionType === 'sale' || transactionType === 'sale_return');
+            if (!isCustomer && invoiceEntityType === 'customer') {
+              console.warn(`Customer invoice ${entry.invoice_number} has incorrect transaction_type: ${transactionType} (expected sale/sale_return)`);
+            }
+            return isCustomer;
+          }
+          // For other entity types (wholesaler, etc.), just match entity_type
+          return invoiceEntityType === entityType;
+        });
       }
+      
+      console.log(`GST Tracker: Found ${filteredData.length} entries after filtering (entityType: ${entityType}, invoiceType: ${invoiceType})`);
 
       // Store entry map for accessing CGST/SGST/IGST per entry
       const entryMap: Record<string, any> = {};
@@ -170,24 +196,48 @@ export const GSTTracker = () => {
       (window as any).gstEntryMap = entryMap;
 
       // Transform gst_entries data to match GSTData interface
-      const transformedData: GSTData[] = filteredData.map((entry: any) => ({
-        id: entry.id,
-        invoice_number: entry.invoice_number,
-        invoice_date: entry.invoice_date,
-        entity_type: entry.invoices?.entity_type || '',
-        invoice_type: entry.invoices?.invoice_type || '',
-        subtotal: entry.taxable_amount || 0,
-        tax_amount: entry.total_gst || 0,
-        total_amount: entry.total_amount || 0,
-        business_entities: undefined,
-        suppliers: undefined,
-        invoice_items: [], // Not populated from gst_entries, use gst_rate directly
-        gst_rate: entry.gst_rate || 0, // Store GST rate from gst_entries for rate analysis
-        transaction_type: entry.transaction_type || '', // Store transaction type to identify returns
-        cgst: entry.cgst || 0,
-        sgst: entry.sgst || 0,
-        igst: entry.igst || 0
-      }));
+      const transformedData: GSTData[] = filteredData.map((entry: any) => {
+        // Determine invoice_type from transaction_type (more accurate than using invoices.invoice_type)
+        // transaction_type from gst_entries is the source of truth
+        let displayInvoiceType = entry.invoices?.invoice_type || '';
+        
+        // Override with transaction_type-based logic for correct categorization
+        // For supplier invoices, transaction_type should be 'purchase' or 'purchase_return'
+        // For customer invoices, transaction_type should be 'sale' or 'sale_return'
+        if (entry.transaction_type === 'purchase' || entry.transaction_type === 'purchase_return') {
+          displayInvoiceType = entry.transaction_type === 'purchase_return' ? 'purchase_return' : 'purchase';
+        } else if (entry.transaction_type === 'sale' || entry.transaction_type === 'sale_return') {
+          displayInvoiceType = entry.transaction_type === 'sale_return' ? 'sale_return' : 'sales';
+        }
+        
+        // Use entity_name from gst_entries (it's already populated correctly)
+        const entityName = entry.entity_name || 'N/A';
+        
+        return {
+          id: entry.id,
+          invoice_number: entry.invoice_number,
+          invoice_date: entry.invoice_date,
+          entity_type: entry.invoices?.entity_type || '',
+          invoice_type: displayInvoiceType, // Use corrected invoice type
+          subtotal: entry.taxable_amount || 0,
+          tax_amount: entry.total_gst || 0,
+          total_amount: entry.total_amount || 0,
+          business_entities: entry.invoices?.entity_type && entry.invoices.entity_type !== 'supplier' ? {
+            name: entityName,
+            gstin: '' // GSTIN not stored in gst_entries, would need to join if required
+          } : undefined,
+          suppliers: entry.invoices?.entity_type === 'supplier' ? {
+            company_name: entityName,
+            gstin: '' // GSTIN not stored in gst_entries, would need to join if required
+          } : undefined,
+          invoice_items: [], // Not populated from gst_entries, use gst_rate directly
+          gst_rate: entry.gst_rate || 0, // Store GST rate from gst_entries for rate analysis
+          transaction_type: entry.transaction_type || '', // Store transaction type to identify returns
+          cgst: entry.cgst || 0,
+          sgst: entry.sgst || 0,
+          igst: entry.igst || 0
+        };
+      });
 
       setGstData(transformedData);
       
@@ -223,10 +273,11 @@ export const GSTTracker = () => {
         total: Math.max(0, totalCGST + totalSGST + totalIGST),
         taxableAmount: Math.max(0, totalTaxableAmount)
       });
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error in fetchGSTData:', error);
       toast({
         title: "Error",
-        description: "Failed to load GST data",
+        description: error?.message || "Failed to load GST data",
         variant: "destructive"
       });
     } finally {
