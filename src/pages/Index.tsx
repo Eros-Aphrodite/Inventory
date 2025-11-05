@@ -16,7 +16,8 @@ import {
   Receipt,
   BookOpen,
   Settings,
-  CreditCard
+  CreditCard,
+  Trash2
 } from "lucide-react";
 import { StatCard } from "@/components/inventory/StatCard";
 import { NavButton } from "@/components/inventory/NavButton";
@@ -58,6 +59,8 @@ const Index = () => {
   const [showImportModal, setShowImportModal] = React.useState(false);
   const [showAddCompanyDialog, setShowAddCompanyDialog] = React.useState(false);
   const [isSavingCompany, setIsSavingCompany] = React.useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = React.useState(false);
+  const [companyToDelete, setCompanyToDelete] = React.useState<{ company_name: string; id: number; [key: string]: any } | null>(null);
   const [companyFormData, setCompanyFormData] = React.useState({
     company_name: "",
     owner_name: "",
@@ -309,6 +312,57 @@ const Index = () => {
     }
   };
 
+  const handleDeleteCompany = async () => {
+    if (!user || !companyToDelete) {
+      return;
+    }
+
+    try {
+      // Get existing business_entities from profile
+      const { data: profileData, error: fetchError } = await supabase
+        .from('profiles')
+        .select('business_entities')
+        .eq('id', user.id)
+        .single();
+
+      if (fetchError) throw fetchError;
+
+      const existingCompanies = (profileData?.business_entities && Array.isArray(profileData.business_entities)) 
+        ? profileData.business_entities 
+        : [];
+      
+      // Remove the company from the array
+      const updatedCompanies = existingCompanies.filter(
+        (entity: any) => entity.company_name !== companyToDelete.company_name
+      );
+
+      // Update profile with updated companies
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ business_entities: updatedCompanies })
+        .eq('id', user.id);
+
+      if (updateError) throw updateError;
+
+      toast.success('Company deleted successfully!');
+      setShowDeleteConfirm(false);
+      setCompanyToDelete(null);
+
+      // If the deleted company was selected, clear selection or select another
+      if (selectedCompany?.company_name === companyToDelete.company_name) {
+        setSelectedCompany(null, user.id);
+        // Clear localStorage for this user's selected company
+        localStorage.removeItem(`selectedCompany_${user.id}`);
+      }
+
+      // Refresh companies list
+      await fetchCompanies();
+    } catch (error: any) {
+      console.error('Failed to delete company:', error);
+      toast.error(error.message || 'Failed to delete company');
+    }
+  };
+
 
   return (
     <div className="min-h-screen bg-background">
@@ -357,6 +411,38 @@ const Index = () => {
           onImportComplete={handleImportComplete}
         />
       </Suspense>
+
+      {/* Delete Company Confirmation Dialog */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Company</DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              Are you sure you want to delete <strong>{companyToDelete?.company_name}</strong>? 
+              This action cannot be undone and will remove all company data.
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowDeleteConfirm(false);
+                setCompanyToDelete(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteCompany}
+            >
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Company Dialog */}
       <Dialog open={showAddCompanyDialog} onOpenChange={setShowAddCompanyDialog}>
@@ -624,6 +710,32 @@ const Index = () => {
                         </option>
                       ))}
                     </select>
+                    {companies.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {companies.map((company) => (
+                          <div
+                            key={company.id}
+                            className="flex items-center justify-between p-2 bg-muted/50 rounded-md hover:bg-muted transition-colors"
+                          >
+                            <span className="text-sm text-foreground truncate flex-1">
+                              {company.company_name}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={() => {
+                                setCompanyToDelete(company);
+                                setShowDeleteConfirm(true);
+                              }}
+                              title={`Delete ${company.company_name}`}
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   
                   {selectedCompany && (
