@@ -23,6 +23,7 @@ import { StatCard } from "@/components/inventory/StatCard";
 import { NavButton } from "@/components/inventory/NavButton";
 import { useAuth } from "@/hooks/useAuth";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -48,6 +49,7 @@ const SubscriptionManager = lazy(() => import("@/components/subscription/Subscri
 const Index = () => {
   const { user, signOut } = useAuth();
   const { selectedCompany, setSelectedCompany, companies, setCompanies, restoreSelectedCompany } = useCompany();
+  const location = useLocation();
   const [activeTab, setActiveTab] = React.useState("dashboard");
   const [dashboardData, setDashboardData] = React.useState({
     totalProducts: 1247,
@@ -93,12 +95,12 @@ const Index = () => {
 
   // Check URL parameters for tab (e.g., ?tab=subscription)
   React.useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(location.search);
     const tab = params.get('tab');
     if (tab && ["dashboard", "gst-calculator", "gst-tracker", "reports", "ledger", "products", "stock-take", "purchase-orders", "invoices", "suppliers", "subscription", "settings"].includes(tab)) {
       setActiveTab(tab);
     }
-  }, []);
+  }, [location.search]);
 
   // Fetch companies from user profile
   React.useEffect(() => {

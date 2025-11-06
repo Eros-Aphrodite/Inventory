@@ -39,8 +39,17 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     searchParams.get('tab') === 'subscription';
   
   // Block access if subscription is expired or not active (except subscription page)
-  if (!isSubscriptionPage && (isExpired || !isActive)) {
-    return <PaymentRequired daysRemaining={daysRemaining} />;
+  // Only show payment required if subscription is actually expired (daysRemaining <= 0)
+  // Allow access if daysRemaining > 0 (even if isExpired flag is set due to edge cases)
+  // Always allow access to subscription page so users can renew
+  if (!isSubscriptionPage) {
+    if (isExpired && daysRemaining <= 0) {
+      return <PaymentRequired daysRemaining={daysRemaining} />;
+    }
+    // Also block if not active (but only if truly expired)
+    if (!isActive && isExpired && daysRemaining <= 0) {
+      return <PaymentRequired daysRemaining={daysRemaining} />;
+    }
   }
   
   return <>{children}</>;

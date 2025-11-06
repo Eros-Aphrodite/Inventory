@@ -73,28 +73,76 @@ export const useSubscription = () => {
       }
 
       if (!subscription) {
-        // No active subscription found
-        setSubscriptionStatus({
-          isActive: false,
-          isExpired: true,
-          isTrial: false,
-          daysRemaining: 0,
-          subscription: null,
-          loading: false
-        });
+        // No active subscription found - check if user is still in 11-month trial period
+        // Get user creation date from profiles or auth
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('created_at')
+          .eq('id', user.id)
+          .single();
+        
+        const userCreatedAt = profile?.created_at || user.created_at;
+        
+        if (userCreatedAt) {
+          // Calculate trial end date (11 months from account creation)
+          const accountCreatedDate = new Date(userCreatedAt);
+          const trialEndDate = new Date(accountCreatedDate);
+          trialEndDate.setMonth(trialEndDate.getMonth() + 11);
+          
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          trialEndDate.setHours(0, 0, 0, 0);
+          
+          const isTrialExpired = trialEndDate < today;
+          const daysRemaining = Math.ceil((trialEndDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+          
+          setSubscriptionStatus({
+            isActive: !isTrialExpired, // Active if trial hasn't expired
+            isExpired: isTrialExpired,
+            isTrial: true,
+            daysRemaining: isTrialExpired ? 0 : daysRemaining,
+            subscription: null,
+            loading: false
+          });
+        } else {
+          // No account creation date found - treat as expired
+          setSubscriptionStatus({
+            isActive: false,
+            isExpired: true,
+            isTrial: false,
+            daysRemaining: 0,
+            subscription: null,
+            loading: false
+          });
+        }
         return;
       }
 
       // Check if subscription is expired
-      const endDate = new Date(subscription.end_date);
+      // Parse end_date as a date string (YYYY-MM-DD) and create date at start of day
+      const endDateStr = subscription.end_date.split('T')[0]; // Get just the date part
+      const endDate = new Date(endDateStr + 'T23:59:59'); // Set to end of the end date
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      endDate.setHours(0, 0, 0, 0);
 
+      // Subscription expires if end date has passed (end date is before today)
+      // If end date is today, it's still valid
       const isExpired = endDate < today;
       const daysRemaining = Math.ceil((endDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
       const isTrial = subscription.subscription_type === 'trial';
-      const isActive = !isExpired && subscription.status === 'active' && subscription.payment_status === 'paid';
+      // For trial subscriptions, allow access even if payment_status is not 'paid' since it's free
+      const isActive = !isExpired && subscription.status === 'active' && 
+        (subscription.payment_status === 'paid' || subscription.subscription_type === 'trial');
+      
+      console.log('Subscription check:', {
+        end_date: subscription.end_date,
+        endDateStr,
+        endDate: endDate.toISOString(),
+        today: today.toISOString(),
+        isExpired,
+        daysRemaining,
+        isActive
+      });
 
       setSubscriptionStatus({
         isActive,

@@ -73,7 +73,10 @@ export const PaymentRequired = ({ daysRemaining }: { daysRemaining?: number }) =
             </Button>
             <Button
               className="flex-1"
-              onClick={() => navigate('/dashboard?tab=subscription')}
+              onClick={() => {
+                // Navigate to subscription page
+                navigate('/dashboard?tab=subscription', { replace: true });
+              }}
             >
               <RefreshCw className="w-4 h-4 mr-2" />
               Renew Subscription
