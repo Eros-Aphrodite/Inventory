@@ -30,7 +30,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   
   // Redirect to landing if not authenticated
   if (!isAuthenticated) {
-    return <Navigate to="/landing" replace />;
+    return <Navigate to="/" replace />;
   }
   
   // Allow access to subscription page even if expired (so user can renew)

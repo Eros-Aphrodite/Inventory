@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { DateInput } from "@/components/ui/date-input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -57,7 +58,6 @@ interface PurchaseOrderItem {
 interface Supplier {
   id: string;
   company_name: string;
-  state?: string;
 }
 
 interface Product {
@@ -182,21 +182,72 @@ export const PurchaseOrderManager = () => {
 
   const fetchSuppliers = async () => {
     try {
+      // Get current user for RLS compliance
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.warn('No user found, cannot fetch suppliers');
+        setSuppliers([]);
+        return;
+      }
+
+      // Build query - RLS policies will handle user filtering automatically
+      // Just select suppliers and let RLS policies determine what the user can see
       let query = supabase
         .from('suppliers')
-        .select('id, company_name, state');
+        .select('id, company_name'); // Removed 'state' - it doesn't exist in suppliers table
 
       // Filter by company if a company is selected
       if (selectedCompany?.company_name) {
-        query = query.eq('company_id', selectedCompany.company_name);
+        // Fetch all suppliers first (RLS will filter by user), then filter by company in memory
+        const { data: allSuppliers, error: allError } = await supabase
+          .from('suppliers')
+          .select('id, company_name')
+          .order('company_name');
+        
+        if (allError) {
+          console.error('Error fetching suppliers:', allError);
+          throw allError;
+        }
+        
+        // Filter in memory: show suppliers matching company_id or null
+        const filtered = (allSuppliers || []).filter(s => 
+          !s.company_id || s.company_id === selectedCompany.company_name
+        );
+        
+        console.log('Loaded suppliers:', filtered.length, 'suppliers (filtered from', allSuppliers?.length || 0, 'total)', filtered);
+        setSuppliers(filtered);
+        return;
       }
-
+      
+      // No company filter - show all suppliers (RLS will filter by user)
       const { data, error } = await query.order('company_name');
 
-      if (error) throw error;
+      if (error) {
+        console.error('Failed to load suppliers - error:', error);
+        throw error;
+      }
+      
+      console.log('Loaded suppliers:', data?.length || 0, 'suppliers', data);
       setSuppliers(data || []);
     } catch (error) {
       console.error('Failed to load suppliers:', error);
+      // Try a simpler query as fallback - just get all suppliers (RLS will filter)
+      try {
+        const { data: fallbackData, error: fallbackError } = await supabase
+          .from('suppliers')
+          .select('id, company_name')
+          .order('company_name');
+        
+        if (!fallbackError && fallbackData) {
+          console.log('Fallback query loaded:', fallbackData.length, 'suppliers');
+          setSuppliers(fallbackData);
+        } else {
+          setSuppliers([]);
+        }
+      } catch (fallbackErr) {
+        console.error('Fallback query also failed:', fallbackErr);
+        setSuppliers([]);
+      }
     }
   };
 
@@ -258,8 +309,8 @@ export const PurchaseOrderManager = () => {
 
       if (error) throw error;
 
-      // Update suppliers list
-      setSuppliers(prev => [...prev, data]);
+      // Refresh suppliers list to ensure it's up to date
+      await fetchSuppliers();
       
       // Select the new supplier
       setFormData(prev => ({ ...prev, supplier_id: data.id }));
@@ -725,11 +776,17 @@ Total: ${formatIndianCurrency(po.total_amount)}`;
                         <SelectValue placeholder="Select supplier" />
                       </SelectTrigger>
                       <SelectContent className="bg-popover border border-border z-50">
-                        {suppliers.map((supplier) => (
-                          <SelectItem key={supplier.id} value={supplier.id}>
-                            {supplier.company_name}
-                          </SelectItem>
-                        ))}
+                        {suppliers.length === 0 ? (
+                          <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                            No suppliers found. Add a new supplier below.
+                          </div>
+                        ) : (
+                          suppliers.map((supplier) => (
+                            <SelectItem key={supplier.id} value={supplier.id}>
+                              {supplier.company_name}
+                            </SelectItem>
+                          ))
+                        )}
                         <SelectItem value="add_new" className="text-primary font-medium">
                           <div className="flex items-center gap-2">
                             <Plus className="w-4 h-4" />
@@ -742,21 +799,21 @@ Total: ${formatIndianCurrency(po.total_amount)}`;
                 </div>
                 <div>
                   <Label htmlFor="order_date">Order Date</Label>
-                  <Input
+                  <DateInput
                     id="order_date"
-                    type="date"
                     value={formData.order_date}
-                    onChange={(e) => setFormData(prev => ({ ...prev, order_date: e.target.value }))}
+                    onChange={(value) => setFormData(prev => ({ ...prev, order_date: value }))}
+                    placeholder="Select order date"
                     required
                   />
                 </div>
                 <div>
                   <Label htmlFor="expected_delivery_date">Expected Delivery</Label>
-                  <Input
+                  <DateInput
                     id="expected_delivery_date"
-                    type="date"
                     value={formData.expected_delivery_date}
-                    onChange={(e) => setFormData(prev => ({ ...prev, expected_delivery_date: e.target.value }))}
+                    onChange={(value) => setFormData(prev => ({ ...prev, expected_delivery_date: value }))}
+                    placeholder="Select delivery date"
                   />
                 </div>
               </div>

@@ -46,7 +46,8 @@ export const PaymentRequired = ({ daysRemaining }: { daysRemaining?: number }) =
     });
     
     // Always navigate immediately - don't wait for API
-    navigate('/landing', { replace: true });
+    // Use root path for better Vercel compatibility
+    navigate('/', { replace: true });
   };
 
   return (
