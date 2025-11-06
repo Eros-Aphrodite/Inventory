@@ -9,58 +9,44 @@ export const PaymentRequired = ({ daysRemaining }: { daysRemaining?: number }) =
   const navigate = useNavigate();
 
   const handleSignOut = async () => {
+    // IMMEDIATELY clear all auth data from storage (synchronous)
     try {
-      // Try to get current session first
-      const { data: { session } } = await supabase.auth.getSession();
+      // Clear all Supabase-related keys from localStorage
+      const keys = Object.keys(localStorage);
+      keys.forEach(key => {
+        if (key.startsWith('sb-') || key.includes('supabase') || key.includes('auth')) {
+          localStorage.removeItem(key);
+        }
+      });
       
-      if (session) {
-        // Try to sign out with local scope
-        try {
-          await supabase.auth.signOut({ scope: 'local' });
-        } catch (signOutError) {
-          console.warn('SignOut API call failed, clearing local storage:', signOutError);
-          // Fallback: manually clear auth data from localStorage
-          try {
-            const keys = Object.keys(localStorage);
-            keys.forEach(key => {
-              if (key.startsWith('sb-') || key.includes('supabase')) {
-                localStorage.removeItem(key);
-              }
-            });
-          } catch (storageError) {
-            console.warn('Failed to clear localStorage:', storageError);
-          }
-        }
-      } else {
-        // No session, just clear localStorage
-        try {
-          const keys = Object.keys(localStorage);
-          keys.forEach(key => {
-            if (key.startsWith('sb-') || key.includes('supabase')) {
-              localStorage.removeItem(key);
-            }
-          });
-        } catch (storageError) {
-          console.warn('Failed to clear localStorage:', storageError);
-        }
-      }
-    } catch (error) {
-      // Even if everything fails, try to clear localStorage
-      console.error('Sign out error:', error);
+      // Also clear sessionStorage
       try {
-        const keys = Object.keys(localStorage);
-        keys.forEach(key => {
-          if (key.startsWith('sb-') || key.includes('supabase')) {
-            localStorage.removeItem(key);
+        const sessionKeys = Object.keys(sessionStorage);
+        sessionKeys.forEach(key => {
+          if (key.startsWith('sb-') || key.includes('supabase') || key.includes('auth')) {
+            sessionStorage.removeItem(key);
           }
         });
-      } catch (storageError) {
-        console.warn('Failed to clear localStorage:', storageError);
+      } catch (e) {
+        // Ignore sessionStorage errors
       }
-    } finally {
-      // Always navigate to landing page, even if signout fails
-      navigate('/landing', { replace: true });
+    } catch (storageError) {
+      console.warn('Failed to clear storage:', storageError);
     }
+    
+    // Try API signout in background with timeout (fire-and-forget)
+    Promise.race([
+      supabase.auth.signOut({ scope: 'local' }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000))
+    ]).catch((error) => {
+      // Silently ignore - we've already cleared local state
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('SignOut API call failed (non-blocking):', error);
+      }
+    });
+    
+    // Always navigate immediately - don't wait for API
+    navigate('/landing', { replace: true });
   };
 
   return (

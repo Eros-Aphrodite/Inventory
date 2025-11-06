@@ -28,70 +28,51 @@ export const useAuth = () => {
   }, []);
 
   const signOut = async () => {
+    // IMMEDIATELY clear local state - don't wait for API
+    // This ensures the UI updates instantly and user can navigate away
+    setUser(null);
+    setSession(null);
+    
+    // Clear localStorage immediately (synchronous operation)
     try {
-      // First, try to get the current session to ensure we have a valid token
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session) {
-        // If we have a session, try to sign out with the session token
-        // Use local scope to avoid 403 errors with global logout
-        const { error } = await supabase.auth.signOut({ scope: 'local' });
-        
-        if (error) {
-          console.warn('SignOut error (non-blocking):', error);
-          // Even if signOut fails, clear local storage manually
-          try {
-            // Clear Supabase auth data from localStorage
-            const keys = Object.keys(localStorage);
-            keys.forEach(key => {
-              if (key.startsWith('sb-') || key.includes('supabase')) {
-                localStorage.removeItem(key);
-              }
-            });
-          } catch (storageError) {
-            console.warn('Failed to clear localStorage:', storageError);
-          }
+      // Clear all Supabase-related keys from localStorage
+      const keys = Object.keys(localStorage);
+      keys.forEach(key => {
+        if (key.startsWith('sb-') || key.includes('supabase') || key.includes('auth')) {
+          localStorage.removeItem(key);
         }
-      } else {
-        // No session exists, just clear local storage
-        try {
-          const keys = Object.keys(localStorage);
-          keys.forEach(key => {
-            if (key.startsWith('sb-') || key.includes('supabase')) {
-              localStorage.removeItem(key);
-            }
-          });
-        } catch (storageError) {
-          console.warn('Failed to clear localStorage:', storageError);
-        }
-      }
+      });
       
-      // Always clear local state, even if server call fails
-      // This ensures the UI updates and user can navigate away
-      setUser(null);
-      setSession(null);
-      
-      return { error: null };
-    } catch (error) {
-      // If signOut fails completely, still clear local state and storage
-      console.error('SignOut error:', error);
-      
+      // Also try to clear sessionStorage
       try {
-        // Clear Supabase auth data from localStorage as fallback
-        const keys = Object.keys(localStorage);
-        keys.forEach(key => {
-          if (key.startsWith('sb-') || key.includes('supabase')) {
-            localStorage.removeItem(key);
+        const sessionKeys = Object.keys(sessionStorage);
+        sessionKeys.forEach(key => {
+          if (key.startsWith('sb-') || key.includes('supabase') || key.includes('auth')) {
+            sessionStorage.removeItem(key);
           }
         });
-      } catch (storageError) {
-        console.warn('Failed to clear localStorage:', storageError);
+      } catch (e) {
+        // Ignore sessionStorage errors
       }
-      
-      setUser(null);
-      setSession(null);
-      return { error: error as Error };
+    } catch (storageError) {
+      console.warn('Failed to clear storage:', storageError);
     }
+    
+    // Try API signout in background (fire-and-forget, don't wait for it)
+    // Use a timeout to prevent hanging, and catch all errors silently
+    Promise.race([
+      supabase.auth.signOut({ scope: 'local' }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000))
+    ]).catch((error) => {
+      // Silently ignore all signout API errors - we've already cleared local state
+      // This is expected in production environments where API calls may fail
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('SignOut API call failed (non-blocking):', error);
+      }
+    });
+    
+    // Always return success since we've cleared local state
+    return { error: null };
   };
 
   return {
