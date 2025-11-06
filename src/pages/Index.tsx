@@ -91,6 +91,15 @@ const Index = () => {
     };
   }, []);
 
+  // Check URL parameters for tab (e.g., ?tab=subscription)
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    if (tab && ["dashboard", "gst-calculator", "gst-tracker", "reports", "ledger", "products", "stock-take", "purchase-orders", "invoices", "suppliers", "subscription", "settings"].includes(tab)) {
+      setActiveTab(tab);
+    }
+  }, []);
+
   // Fetch companies from user profile
   React.useEffect(() => {
     if (user) {

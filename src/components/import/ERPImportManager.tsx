@@ -110,23 +110,116 @@ export function ERPImportManager({ onClose, onImportComplete }: ERPImportManager
     try {
       if (activeTab === 'products') {
         const products = parseResult.data as ERPProduct[];
-        const productsToInsert = products.map(product => ({
-          name: product.name,
-          sku: product.sku?.trim() || null,
-          description: product.description || null,
-          hsn_code: product.hsnCode || null,
-          unit: product.unit || 'Nos',
-          selling_price: product.sellingPrice || null,
-          purchase_price: product.purchasePrice || null,
-          gst_rate: product.gstRate || 18,
-          current_stock: product.currentStock || 0,
-          min_stock_level: product.minStock || 0,
-          max_stock_level: product.maxStock || null,
-          supplier_id: selectedSupplierId || null // Assign selected supplier if provided, otherwise null
-        }));
-
         const { data: userData } = await supabase.auth.getUser();
         if (!userData.user) throw new Error('User not authenticated');
+
+        // First, process suppliers from product data
+        const supplierMap = new Map<string, string>(); // Maps supplier identifier to supplier_id
+        let suppliersCreatedCount = 0;
+        
+        // Extract unique suppliers from products
+        const suppliersFromProducts = products
+          .filter(p => p.supplierCompany || p.supplierName || p.supplierGSTIN)
+          .map(p => ({
+            company_name: p.supplierCompany || p.supplierName || 'Unknown Supplier',
+            contact_person: p.supplierContact || p.supplierName || null,
+            phone: p.supplierPhone || null,
+            email: p.supplierEmail || null,
+            address: p.supplierAddress || null,
+            gstin: p.supplierGSTIN || null,
+            pan: p.supplierPAN || null,
+            identifier: p.supplierGSTIN || p.supplierCompany || p.supplierName || ''
+          }))
+          .filter((s, index, self) => 
+            index === self.findIndex(t => 
+              (t.gstin && t.gstin === s.gstin) || 
+              (!t.gstin && t.company_name.toLowerCase() === s.company_name.toLowerCase())
+            )
+          );
+
+        // Check existing suppliers and create new ones
+        if (suppliersFromProducts.length > 0) {
+          const existingSuppliers = await supabase
+            .from('suppliers')
+            .select('id, company_name, gstin')
+            .eq('company_id', selectedCompany.company_name)
+            .eq('user_id', userData.user.id);
+
+          const existingMap = new Map<string, string>();
+          (existingSuppliers.data || []).forEach(s => {
+            const key = s.gstin || s.company_name.toLowerCase();
+            existingMap.set(key, s.id);
+          });
+
+          // Create new suppliers
+          const suppliersToCreate = suppliersFromProducts
+            .filter(s => {
+              const key = s.gstin || s.company_name.toLowerCase();
+              return !existingMap.has(key);
+            })
+            .map(s => ({
+              company_name: s.company_name,
+              contact_person: s.contact_person,
+              phone: s.phone,
+              email: s.email,
+              address: s.address,
+              gstin: s.gstin,
+              pan: s.pan,
+              user_id: userData.user.id,
+              company_id: selectedCompany.company_name
+            }));
+
+          if (suppliersToCreate.length > 0) {
+            const { data: newSuppliers, error: supplierError } = await supabase
+              .from('suppliers')
+              .insert(suppliersToCreate)
+              .select('id, company_name, gstin');
+
+            if (supplierError) {
+              console.error('Error creating suppliers:', supplierError);
+            } else {
+              suppliersCreatedCount = newSuppliers?.length || 0;
+              // Add new suppliers to map
+              newSuppliers?.forEach(s => {
+                const key = s.gstin || s.company_name.toLowerCase();
+                supplierMap.set(key, s.id);
+              });
+            }
+          }
+
+          // Add existing suppliers to map
+          existingMap.forEach((id, key) => {
+            supplierMap.set(key, id);
+          });
+        }
+
+        // Map products to supplier IDs
+        const productsToInsert = products.map(product => {
+          // Determine supplier ID
+          let supplierId = selectedSupplierId || null;
+          
+          if (!supplierId && (product.supplierCompany || product.supplierName || product.supplierGSTIN)) {
+            const supplierKey = product.supplierGSTIN || 
+                              product.supplierCompany?.toLowerCase() || 
+                              product.supplierName?.toLowerCase() || '';
+            supplierId = supplierMap.get(supplierKey) || null;
+          }
+
+          return {
+            name: product.name,
+            sku: product.sku?.trim() || null,
+            description: product.description || null,
+            hsn_code: product.hsnCode || null,
+            unit: product.unit || 'Nos',
+            selling_price: product.sellingPrice || null,
+            purchase_price: product.purchasePrice || null,
+            gst_rate: product.gstRate || 18,
+            current_stock: product.currentStock || 0,
+            min_stock_level: product.minStock || 0,
+            max_stock_level: product.maxStock || null,
+            supplier_id: supplierId
+          };
+        });
 
         // Check for existing products in the database to prevent duplicates
         const productNames = productsToInsert.map(p => p.name.trim().toLowerCase());
@@ -255,10 +348,20 @@ export function ERPImportManager({ onClose, onImportComplete }: ERPImportManager
 
         const skippedCount = products.length - uniqueProducts.length;
         let message = `Successfully imported ${processedCount} products`;
+        
+        // Add supplier creation info
+        if (suppliersFromProducts.length > 0) {
+          if (suppliersCreatedCount > 0) {
+            message += `. ${suppliersCreatedCount} supplier(s) created automatically.`;
+          } else if (supplierMap.size > 0) {
+            message += `. Linked to ${supplierMap.size} existing supplier(s).`;
+          }
+        }
+        
         if (skippedCount > 0) {
           const duplicateInFileCount = duplicateInBatch.length;
           const duplicateInDbCount = duplicateInDatabase.length;
-          message += `. ${skippedCount} duplicate(s) skipped (${duplicateInFileCount} in file, ${duplicateInDbCount} already in database).`;
+          message += ` ${skippedCount} duplicate(s) skipped (${duplicateInFileCount} in file, ${duplicateInDbCount} already in database).`;
         }
 
         toast({
@@ -424,12 +527,17 @@ export function ERPImportManager({ onClose, onImportComplete }: ERPImportManager
     window.URL.revokeObjectURL(url);
   };
 
-  const resetForm = () => {
+  const resetForm = React.useCallback(() => {
     setFile(null);
     setParseResult(null);
     setCurrentStep('upload');
     setSelectedSupplierId("");
-  };
+  }, []);
+
+  // Reset form state when switching tabs
+  React.useEffect(() => {
+    resetForm();
+  }, [activeTab, resetForm]);
 
   // Fetch suppliers when component mounts or company changes
   React.useEffect(() => {
@@ -682,11 +790,12 @@ function ImportContent({
               accept=".csv,.xlsx,.xls,.json"
               onChange={onFileUpload}
               className="hidden"
-              id="file-upload"
+              id={`file-upload-${type}`}
+              key={`file-upload-${type}`}
               disabled={isProcessing || !selectedCompany}
             />
             <label
-              htmlFor="file-upload"
+              htmlFor={`file-upload-${type}`}
               className={cn(
                 "inline-flex items-center gap-2 px-6 py-3 rounded-md transition-colors",
                 isProcessing || !selectedCompany
@@ -918,6 +1027,7 @@ function ProductPreviewTable({ data }: { data: ERPProduct[] }) {
           <th className="text-center py-2">Unit</th>
           <th className="text-right py-2">Price</th>
           <th className="text-center py-2">GST%</th>
+          <th className="text-left py-2">Supplier</th>
         </tr>
       </thead>
       <tbody>
@@ -929,6 +1039,9 @@ function ProductPreviewTable({ data }: { data: ERPProduct[] }) {
             <td className="py-2 text-center">{product.unit || 'Nos'}</td>
             <td className="py-2 text-right">{formatIndianCurrency(product.sellingPrice || 0)}</td>
             <td className="py-2 text-center">{product.gstRate || 18}%</td>
+            <td className="py-2 text-left">
+              {product.supplierCompany || product.supplierName || '-'}
+            </td>
           </tr>
         ))}
       </tbody>

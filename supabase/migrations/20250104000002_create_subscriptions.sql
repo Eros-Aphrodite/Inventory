@@ -29,6 +29,11 @@ CREATE INDEX IF NOT EXISTS idx_subscriptions_end_date ON public.subscriptions(en
 -- Enable RLS
 ALTER TABLE public.subscriptions ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if they exist
+DROP POLICY IF EXISTS "Users can view their own subscriptions" ON public.subscriptions;
+DROP POLICY IF EXISTS "Users can create their own subscriptions" ON public.subscriptions;
+DROP POLICY IF EXISTS "Users can update their own subscriptions" ON public.subscriptions;
+
 -- RLS Policies for subscriptions
 CREATE POLICY "Users can view their own subscriptions"
 ON public.subscriptions
@@ -52,10 +57,10 @@ DECLARE
   new_subscription_id UUID;
   subscription_end_date DATE;
 BEGIN
-  -- Calculate end date (1 year from now for new signup)
-  subscription_end_date := CURRENT_DATE + INTERVAL '1 year';
+  -- Calculate end date (11 months free trial from signup)
+  subscription_end_date := CURRENT_DATE + INTERVAL '11 months';
   
-  -- Create subscription with initial payment (INR 6000 for new signup)
+  -- Create subscription with free trial (no payment required for first 11 months)
   INSERT INTO public.subscriptions (
     user_id,
     subscription_type,
@@ -69,15 +74,15 @@ BEGIN
     notes
   ) VALUES (
     NEW.id,
-    'annual',
+    'trial',
     'active',
-    6000.00, -- Initial signup price
+    0.00, -- Free trial - no initial payment
     CURRENT_DATE,
     subscription_end_date,
-    subscription_end_date, -- Set renewal date same as end date
-    'paid',
-    'signup',
-    'Initial subscription payment on signup'
+    subscription_end_date, -- Set renewal date same as end date (11 months from now)
+    'paid', -- Mark as paid since it's free trial
+    'trial',
+    '11-month free trial period - No payment required'
   ) RETURNING id INTO new_subscription_id;
   
   -- Update profile with subscription info
@@ -117,7 +122,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
--- Create trigger for automatic timestamp updates
+-- Create trigger for automatic timestamp updates (drop if exists first)
+DROP TRIGGER IF EXISTS update_subscriptions_updated_at ON public.subscriptions;
 CREATE TRIGGER update_subscriptions_updated_at
 BEFORE UPDATE ON public.subscriptions
 FOR EACH ROW

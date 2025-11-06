@@ -16,6 +16,15 @@ export interface ERPProduct {
   location?: string;
   brand?: string;
   barcode?: string;
+  // Supplier information fields
+  supplierName?: string;
+  supplierCompany?: string;
+  supplierContact?: string;
+  supplierPhone?: string;
+  supplierEmail?: string;
+  supplierGSTIN?: string;
+  supplierPAN?: string;
+  supplierAddress?: string;
 }
 
 export interface ERPSupplier {
@@ -73,7 +82,17 @@ const PRODUCT_FIELD_MAPPINGS = {
   // Additional info
   location: ['Location', 'Warehouse', 'Godown', 'Store'],
   brand: ['Brand', 'Make', 'Manufacturer'],
-  barcode: ['Barcode', 'EAN', 'UPC', 'Barcode No']
+  barcode: ['Barcode', 'EAN', 'UPC', 'Barcode No'],
+  
+  // Supplier information
+  supplierName: ['Supplier Name', 'Supplier', 'Vendor Name', 'Vendor'],
+  supplierCompany: ['Supplier Company', 'Supplier Company Name', 'Vendor Company'],
+  supplierContact: ['Supplier Contact', 'Supplier Contact Person', 'Vendor Contact'],
+  supplierPhone: ['Supplier Phone', 'Supplier Mobile', 'Supplier Contact No', 'Vendor Phone'],
+  supplierEmail: ['Supplier Email', 'Supplier Email ID', 'Vendor Email'],
+  supplierGSTIN: ['Supplier GSTIN', 'Supplier GST No', 'Supplier GST Number', 'Vendor GSTIN'],
+  supplierPAN: ['Supplier PAN', 'Supplier PAN No', 'Vendor PAN'],
+  supplierAddress: ['Supplier Address', 'Supplier Full Address', 'Vendor Address']
 };
 
 const SUPPLIER_FIELD_MAPPINGS = {
@@ -260,6 +279,14 @@ function mapProductField(product: Partial<ERPProduct>, field: string, value: str
     case 'location':
     case 'brand':
     case 'barcode':
+    case 'supplierName':
+    case 'supplierCompany':
+    case 'supplierContact':
+    case 'supplierPhone':
+    case 'supplierEmail':
+    case 'supplierGSTIN':
+    case 'supplierPAN':
+    case 'supplierAddress':
       (product as any)[field] = value;
       break;
       
@@ -406,7 +433,15 @@ export function generateSampleCSV(type: 'products' | 'suppliers'): string {
       'Selling Price',
       'Purchase Price',
       'GST Rate',
-      'HSN Code'
+      'HSN Code',
+      'Supplier Name',
+      'Supplier Company',
+      'Supplier Contact',
+      'Supplier Phone',
+      'Supplier Email',
+      'Supplier GSTIN',
+      'Supplier PAN',
+      'Supplier Address'
     ];
     
     const sampleData = [
@@ -421,7 +456,15 @@ export function generateSampleCSV(type: 'products' | 'suppliers'): string {
         '65.50',
         '60.00',
         '18',
-        '7213'
+        '7213',
+        'Rajesh Kumar',
+        'ABC Steel Suppliers',
+        'Rajesh Kumar',
+        '+91-9876543210',
+        'rajesh@abcsteel.com',
+        '06ABCDE1234F1Z5',
+        'ABCDE1234F',
+        '123 Industrial Area, Sector 15, Gurgaon, Haryana'
       ],
       [
         'Cement OPC 53 Grade',
@@ -434,7 +477,15 @@ export function generateSampleCSV(type: 'products' | 'suppliers'): string {
         '420.00',
         '400.00',
         '28',
-        '2523'
+        '2523',
+        'Amit Patel',
+        'Quality Cement Works',
+        'Amit Patel',
+        '+91-9876543212',
+        'amit@qualitycement.com',
+        '24KLMNO9012P3Q7',
+        'KLMNO9012P',
+        '789 Factory Road, GIDC, Ahmedabad, Gujarat'
       ],
       [
         'Mobile Phone',
@@ -447,7 +498,15 @@ export function generateSampleCSV(type: 'products' | 'suppliers'): string {
         '15000.00',
         '12000.00',
         '18',
-        '8517'
+        '8517',
+        'Priya Sharma',
+        'Modern Electronics Ltd',
+        'Priya Sharma',
+        '+91-9876543211',
+        'priya@modernelectronics.com',
+        '29FGHIJ5678K2L9',
+        'FGHIJ5678K',
+        '456 Tech Park, Phase 2, Bangalore, Karnataka'
       ]
     ];
     
@@ -463,6 +522,7 @@ export function generateSampleCSV(type: 'products' | 'suppliers'): string {
       'Address',
       'City',
       'State',
+      'Pincode',
       'GSTIN',
       'PAN'
     ];
@@ -476,6 +536,7 @@ export function generateSampleCSV(type: 'products' | 'suppliers'): string {
         '123 Industrial Area, Sector 15',
         'Gurgaon',
         'Haryana',
+        '122001',
         '06ABCDE1234F1Z5',
         'ABCDE1234F'
       ],
@@ -487,6 +548,7 @@ export function generateSampleCSV(type: 'products' | 'suppliers'): string {
         '456 Tech Park, Phase 2',
         'Bangalore',
         'Karnataka',
+        '560001',
         '29FGHIJ5678K2L9',
         'FGHIJ5678K'
       ],
@@ -498,6 +560,7 @@ export function generateSampleCSV(type: 'products' | 'suppliers'): string {
         '789 Factory Road, GIDC',
         'Ahmedabad',
         'Gujarat',
+        '380001',
         '24KLMNO9012P3Q7',
         'KLMNO9012P'
       ]

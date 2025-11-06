@@ -2,21 +2,25 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
+import { useSubscription } from "@/hooks/useSubscription";
 import { CompanyProvider } from "@/contexts/CompanyContext";
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import Landing from "./pages/Landing";
 import NotFound from "./pages/NotFound";
-import { useEffect } from "react";
+import { PaymentRequired } from "@/components/subscription/PaymentRequired";
 
 const queryClient = new QueryClient();
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading: authLoading } = useAuth();
+  const { isActive, isExpired, loading: subscriptionLoading, daysRemaining } = useSubscription();
+  const location = useLocation();
   
-  if (loading) {
+  // Show loading while checking authentication
+  if (authLoading || subscriptionLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
@@ -24,7 +28,22 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
     );
   }
   
-  return isAuthenticated ? <>{children}</> : <Navigate to="/landing" replace />;
+  // Redirect to landing if not authenticated
+  if (!isAuthenticated) {
+    return <Navigate to="/landing" replace />;
+  }
+  
+  // Allow access to subscription page even if expired (so user can renew)
+  const searchParams = new URLSearchParams(location.search);
+  const isSubscriptionPage = location.pathname === '/dashboard' && 
+    searchParams.get('tab') === 'subscription';
+  
+  // Block access if subscription is expired or not active (except subscription page)
+  if (!isSubscriptionPage && (isExpired || !isActive)) {
+    return <PaymentRequired daysRemaining={daysRemaining} />;
+  }
+  
+  return <>{children}</>;
 };
 
 const App = () => (
