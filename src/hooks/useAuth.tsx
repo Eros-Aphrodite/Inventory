@@ -29,18 +29,65 @@ export const useAuth = () => {
 
   const signOut = async () => {
     try {
-      // Use local scope to avoid 403 errors with global logout
-      // This signs out from the current session only
-      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      // First, try to get the current session to ensure we have a valid token
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session) {
+        // If we have a session, try to sign out with the session token
+        // Use local scope to avoid 403 errors with global logout
+        const { error } = await supabase.auth.signOut({ scope: 'local' });
+        
+        if (error) {
+          console.warn('SignOut error (non-blocking):', error);
+          // Even if signOut fails, clear local storage manually
+          try {
+            // Clear Supabase auth data from localStorage
+            const keys = Object.keys(localStorage);
+            keys.forEach(key => {
+              if (key.startsWith('sb-') || key.includes('supabase')) {
+                localStorage.removeItem(key);
+              }
+            });
+          } catch (storageError) {
+            console.warn('Failed to clear localStorage:', storageError);
+          }
+        }
+      } else {
+        // No session exists, just clear local storage
+        try {
+          const keys = Object.keys(localStorage);
+          keys.forEach(key => {
+            if (key.startsWith('sb-') || key.includes('supabase')) {
+              localStorage.removeItem(key);
+            }
+          });
+        } catch (storageError) {
+          console.warn('Failed to clear localStorage:', storageError);
+        }
+      }
       
       // Always clear local state, even if server call fails
       // This ensures the UI updates and user can navigate away
       setUser(null);
       setSession(null);
       
-      return { error };
+      return { error: null };
     } catch (error) {
-      // If signOut fails completely, still clear local state
+      // If signOut fails completely, still clear local state and storage
+      console.error('SignOut error:', error);
+      
+      try {
+        // Clear Supabase auth data from localStorage as fallback
+        const keys = Object.keys(localStorage);
+        keys.forEach(key => {
+          if (key.startsWith('sb-') || key.includes('supabase')) {
+            localStorage.removeItem(key);
+          }
+        });
+      } catch (storageError) {
+        console.warn('Failed to clear localStorage:', storageError);
+      }
+      
       setUser(null);
       setSession(null);
       return { error: error as Error };

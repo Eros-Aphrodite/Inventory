@@ -10,11 +10,53 @@ export const PaymentRequired = ({ daysRemaining }: { daysRemaining?: number }) =
 
   const handleSignOut = async () => {
     try {
-      // Use local scope to avoid 403 errors with global logout
-      await supabase.auth.signOut({ scope: 'local' });
+      // Try to get current session first
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session) {
+        // Try to sign out with local scope
+        try {
+          await supabase.auth.signOut({ scope: 'local' });
+        } catch (signOutError) {
+          console.warn('SignOut API call failed, clearing local storage:', signOutError);
+          // Fallback: manually clear auth data from localStorage
+          try {
+            const keys = Object.keys(localStorage);
+            keys.forEach(key => {
+              if (key.startsWith('sb-') || key.includes('supabase')) {
+                localStorage.removeItem(key);
+              }
+            });
+          } catch (storageError) {
+            console.warn('Failed to clear localStorage:', storageError);
+          }
+        }
+      } else {
+        // No session, just clear localStorage
+        try {
+          const keys = Object.keys(localStorage);
+          keys.forEach(key => {
+            if (key.startsWith('sb-') || key.includes('supabase')) {
+              localStorage.removeItem(key);
+            }
+          });
+        } catch (storageError) {
+          console.warn('Failed to clear localStorage:', storageError);
+        }
+      }
     } catch (error) {
-      // Even if signout fails, navigate away
+      // Even if everything fails, try to clear localStorage
       console.error('Sign out error:', error);
+      try {
+        const keys = Object.keys(localStorage);
+        keys.forEach(key => {
+          if (key.startsWith('sb-') || key.includes('supabase')) {
+            localStorage.removeItem(key);
+          }
+        });
+      } catch (storageError) {
+        console.warn('Failed to clear localStorage:', storageError);
+      }
     } finally {
       // Always navigate to landing page, even if signout fails
       navigate('/landing', { replace: true });

@@ -8,10 +8,43 @@ const SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiO
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
+// Custom storage adapter that works better in production environments
+const getStorageAdapter = () => {
+  if (typeof window === 'undefined') {
+    // Server-side: return a no-op storage
+    return {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+    };
+  }
+  
+  // Client-side: use localStorage with error handling
+  try {
+    return localStorage;
+  } catch (error) {
+    console.warn('localStorage not available, using memory storage');
+    // Fallback to in-memory storage if localStorage fails
+    const memoryStorage: { [key: string]: string } = {};
+    return {
+      getItem: (key: string) => memoryStorage[key] || null,
+      setItem: (key: string, value: string) => { memoryStorage[key] = value; },
+      removeItem: (key: string) => { delete memoryStorage[key]; },
+    };
+  }
+};
+
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
-    storage: localStorage,
+    storage: getStorageAdapter(),
     persistSession: true,
     autoRefreshToken: true,
-  }
+    detectSessionInUrl: true,
+    flowType: 'pkce', // Use PKCE flow for better security in production
+  },
+  global: {
+    headers: {
+      'x-client-info': 'inventory-app',
+    },
+  },
 });
