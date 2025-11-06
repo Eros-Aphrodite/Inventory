@@ -28,12 +28,23 @@ export const useAuth = () => {
   }, []);
 
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (!error) {
+    try {
+      // Use local scope to avoid 403 errors with global logout
+      // This signs out from the current session only
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      
+      // Always clear local state, even if server call fails
+      // This ensures the UI updates and user can navigate away
       setUser(null);
       setSession(null);
+      
+      return { error };
+    } catch (error) {
+      // If signOut fails completely, still clear local state
+      setUser(null);
+      setSession(null);
+      return { error: error as Error };
     }
-    return { error };
   };
 
   return {

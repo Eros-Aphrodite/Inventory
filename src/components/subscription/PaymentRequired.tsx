@@ -9,8 +9,16 @@ export const PaymentRequired = ({ daysRemaining }: { daysRemaining?: number }) =
   const navigate = useNavigate();
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    navigate('/landing');
+    try {
+      // Use local scope to avoid 403 errors with global logout
+      await supabase.auth.signOut({ scope: 'local' });
+    } catch (error) {
+      // Even if signout fails, navigate away
+      console.error('Sign out error:', error);
+    } finally {
+      // Always navigate to landing page, even if signout fails
+      navigate('/landing', { replace: true });
+    }
   };
 
   return (
