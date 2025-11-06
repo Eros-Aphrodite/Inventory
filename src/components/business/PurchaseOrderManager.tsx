@@ -69,6 +69,7 @@ interface Product {
   gst_rate: number;
   current_stock?: number;
   min_stock_level?: number | null;
+  supplier_id?: string | null;
 }
 
 export const PurchaseOrderManager = () => {
@@ -95,6 +96,7 @@ export const PurchaseOrderManager = () => {
   });
   const [companyState, setCompanyState] = useState('27'); // Default to Maharashtra
   const [forceIGST, setForceIGST] = useState(false); // Manual IGST selection override
+  const [showLowStockOnly, setShowLowStockOnly] = useState(false); // Filter low stock products
   const [newSupplierData, setNewSupplierData] = useState({
     company_name: "",
     contact_person: "",
@@ -114,6 +116,10 @@ export const PurchaseOrderManager = () => {
   const { toast } = useToast();
 
   useEffect(() => {
+    // Clear state first to prevent showing stale data
+    setSuppliers([]);
+    setProducts([]);
+    // Then fetch fresh data
     fetchPurchaseOrders();
     fetchSuppliers();
     fetchProducts();
@@ -190,64 +196,98 @@ export const PurchaseOrderManager = () => {
         return;
       }
 
-      // Build query - RLS policies will handle user filtering automatically
-      // Just select suppliers and let RLS policies determine what the user can see
+      // Build query - explicitly select only id and company_name from suppliers table
+      // Try to fetch suppliers with user_id matching, or with null user_id (legacy)
       let query = supabase
         .from('suppliers')
-        .select('id, company_name'); // Removed 'state' - it doesn't exist in suppliers table
+        .select('id, company_name')
+        .or(`user_id.eq.${user.id},user_id.is.null`)
+        .not('company_name', 'is', null); // Ensure company_name is not null
 
       // Filter by company if a company is selected
       if (selectedCompany?.company_name) {
-        // Fetch all suppliers first (RLS will filter by user), then filter by company in memory
-        const { data: allSuppliers, error: allError } = await supabase
-          .from('suppliers')
-          .select('id, company_name')
-          .order('company_name');
+        // First get all suppliers, then filter by company_id in memory
+        const { data: allSuppliers, error: allError } = await query.order('company_name');
         
         if (allError) {
           console.error('Error fetching suppliers:', allError);
-          throw allError;
+          // If OR query fails, try separate queries
+          const { data: userSuppliers } = await supabase
+            .from('suppliers')
+            .select('id, company_name, company_id')
+            .eq('user_id', user.id)
+            .not('company_name', 'is', null)
+            .order('company_name');
+          
+          const { data: legacySuppliers } = await supabase
+            .from('suppliers')
+            .select('id, company_name, company_id')
+            .is('user_id', null)
+            .not('company_name', 'is', null)
+            .order('company_name');
+          
+          const combined = [...(userSuppliers || []), ...(legacySuppliers || [])];
+          const filtered = combined.filter(s => 
+            s && s.id && s.company_name && (!s.company_id || s.company_id === selectedCompany.company_name)
+          );
+          
+          console.log('Loaded suppliers (fallback):', filtered.length, 'suppliers');
+          setSuppliers(filtered.map(s => ({ id: s.id, company_name: s.company_name })));
+          return;
         }
         
+        // Get company_id for filtering
+        const { data: suppliersWithCompany } = await supabase
+          .from('suppliers')
+          .select('id, company_name, company_id')
+          .or(`user_id.eq.${user.id},user_id.is.null`)
+          .not('company_name', 'is', null)
+          .order('company_name');
+        
         // Filter in memory: show suppliers matching company_id or null
-        const filtered = (allSuppliers || []).filter(s => 
-          !s.company_id || s.company_id === selectedCompany.company_name
+        const filtered = (suppliersWithCompany || []).filter(s => 
+          s && s.id && s.company_name && (!s.company_id || s.company_id === selectedCompany.company_name)
         );
         
-        console.log('Loaded suppliers:', filtered.length, 'suppliers (filtered from', allSuppliers?.length || 0, 'total)', filtered);
-        setSuppliers(filtered);
+        console.log('Loaded suppliers:', filtered.length, 'suppliers (filtered from', suppliersWithCompany?.length || 0, 'total)');
+        setSuppliers(filtered.map(s => ({ id: s.id, company_name: s.company_name })));
         return;
       }
       
-      // No company filter - show all suppliers (RLS will filter by user)
+      // No company filter - show all suppliers for user
       const { data, error } = await query.order('company_name');
 
       if (error) {
         console.error('Failed to load suppliers - error:', error);
-        throw error;
-      }
-      
-      console.log('Loaded suppliers:', data?.length || 0, 'suppliers', data);
-      setSuppliers(data || []);
-    } catch (error) {
-      console.error('Failed to load suppliers:', error);
-      // Try a simpler query as fallback - just get all suppliers (RLS will filter)
-      try {
-        const { data: fallbackData, error: fallbackError } = await supabase
+        // Fallback: try separate queries
+        const { data: userSuppliers } = await supabase
           .from('suppliers')
           .select('id, company_name')
+          .eq('user_id', user.id)
+          .not('company_name', 'is', null)
           .order('company_name');
         
-        if (!fallbackError && fallbackData) {
-          console.log('Fallback query loaded:', fallbackData.length, 'suppliers');
-          setSuppliers(fallbackData);
-        } else {
-          setSuppliers([]);
-        }
-      } catch (fallbackErr) {
-        console.error('Fallback query also failed:', fallbackErr);
-        setSuppliers([]);
+        const { data: legacySuppliers } = await supabase
+          .from('suppliers')
+          .select('id, company_name')
+          .is('user_id', null)
+          .not('company_name', 'is', null)
+          .order('company_name');
+        
+        const combined = [...(userSuppliers || []), ...(legacySuppliers || [])];
+        const validSuppliers = combined.filter(s => s && s.id && s.company_name);
+        console.log('Loaded suppliers (fallback):', validSuppliers.length, 'suppliers');
+        setSuppliers(validSuppliers.map(s => ({ id: s.id, company_name: s.company_name })));
+        return;
       }
+      
+      // Ensure we only have valid suppliers with id and company_name
+      const validSuppliers = (data || []).filter(s => s && s.id && s.company_name);
+      console.log('Loaded suppliers:', validSuppliers.length, 'suppliers (filtered from', data?.length || 0, 'total)');
+      setSuppliers(validSuppliers.map(s => ({ id: s.id, company_name: s.company_name })));
+    } catch (error) {
+      console.error('Failed to load suppliers:', error);
+      setSuppliers([]);
     }
   };
 
@@ -277,21 +317,68 @@ export const PurchaseOrderManager = () => {
 
   const fetchProducts = async () => {
     try {
+      // Get current user for RLS compliance
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        console.warn('No user found, cannot fetch products');
+        setProducts([]);
+        return;
+      }
+
+      // Always filter by user_id to ensure we only get products (not suppliers)
+      // Explicitly select only from products table with specific fields including supplier_id
       let query = supabase
         .from('products')
-        .select('id, name, description, hsn_code, purchase_price, gst_rate, current_stock, min_stock_level');
+        .select('id, name, description, hsn_code, purchase_price, gst_rate, current_stock, min_stock_level, supplier_id')
+        .eq('user_id', user.id)
+        .not('name', 'is', null); // Ensure name is not null
 
       // Filter by company if a company is selected
       if (selectedCompany?.company_name) {
-        query = query.eq('company_id', selectedCompany.company_name);
+        query = query.or(`company_id.eq.${selectedCompany.company_name},company_id.is.null`);
       }
 
       const { data, error } = await query.order('name');
 
-      if (error) throw error;
-      setProducts(data || []);
+      if (error) {
+        console.error('Failed to load products:', error);
+        throw error;
+      }
+      
+      // Double-check: ensure we only have products (filter out any potential suppliers and test data)
+      // Products have: name, current_stock, purchase_price, gst_rate
+      // Suppliers have: company_name (NOT name), contact_person, email, phone
+      // The key difference: products table has 'name' field, suppliers table has 'company_name' field
+      // If a record has 'company_name' field, it's from suppliers table, not products table
+      const validProducts = (data || []).filter(p => {
+        if (!p || !p.id || !p.name) return false;
+        
+        // Exclude if it has supplier-specific fields (this means it's from suppliers table, not products)
+        if (p.company_name || p.contact_person || p.email || p.phone || p.gstin || p.pan) {
+          console.warn('Filtered out supplier from products (has supplier fields):', p.name || p.company_name);
+          return false;
+        }
+        
+        // Exclude generic/test product names like "Product 141", "Product 142", etc.
+        const productName = p.name.trim();
+        const genericProductPattern = /^product\s+\d+$/i; // Matches "Product 141", "product 142", etc.
+        if (genericProductPattern.test(productName)) {
+          console.warn('Filtered out generic/test product:', productName);
+          return false;
+        }
+        
+        // Ensure it has product-specific fields (products should have at least one of these)
+        return p.name && (p.current_stock !== undefined || p.purchase_price !== undefined || p.gst_rate !== undefined);
+      });
+      
+      console.log('Loaded products:', validProducts.length, 'products (filtered from', data?.length || 0, 'total)');
+      if (data && data.length > validProducts.length) {
+        console.warn('Filtered out', data.length - validProducts.length, 'non-product items from products list');
+      }
+      setProducts(validProducts);
     } catch (error) {
       console.error('Failed to load products:', error);
+      setProducts([]);
     }
   };
 
@@ -640,6 +727,7 @@ Total: ${formatIndianCurrency(po.total_amount)}`;
       expected_delivery_date: "",
       notes: ""
     });
+    setShowLowStockOnly(false);
     setLineItems([{
       product_id: "",
       description: "",
@@ -781,11 +869,13 @@ Total: ${formatIndianCurrency(po.total_amount)}`;
                             No suppliers found. Add a new supplier below.
                           </div>
                         ) : (
-                          suppliers.map((supplier) => (
-                            <SelectItem key={supplier.id} value={supplier.id}>
-                              {supplier.company_name}
-                            </SelectItem>
-                          ))
+                          suppliers
+                            .filter(s => s && s.id && s.company_name && !s.name) // Extra safety: ensure it's a supplier, not a product
+                            .map((supplier) => (
+                              <SelectItem key={supplier.id} value={supplier.id}>
+                                {supplier.company_name}
+                              </SelectItem>
+                            ))
                         )}
                         <SelectItem value="add_new" className="text-primary font-medium">
                           <div className="flex items-center gap-2">
@@ -818,18 +908,32 @@ Total: ${formatIndianCurrency(po.total_amount)}`;
                 </div>
               </div>
 
-              {/* IGST Override Option */}
-              <div className="flex items-center space-x-2 p-3 border rounded-md bg-muted/50">
-                <input
-                  type="checkbox"
-                  id="forceIGST"
-                  checked={forceIGST}
-                  onChange={(e) => setForceIGST(e.target.checked)}
-                  className="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary cursor-pointer"
-                />
-                <Label htmlFor="forceIGST" className="font-normal cursor-pointer text-sm">
-                  Force IGST (Apply full tax % as IGST regardless of state)
-                </Label>
+              {/* Options */}
+              <div className="space-y-2">
+                <div className="flex items-center space-x-2 p-3 border rounded-md bg-muted/50">
+                  <input
+                    type="checkbox"
+                    id="forceIGST"
+                    checked={forceIGST}
+                    onChange={(e) => setForceIGST(e.target.checked)}
+                    className="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary cursor-pointer"
+                  />
+                  <Label htmlFor="forceIGST" className="font-normal cursor-pointer text-sm">
+                    Force IGST (Apply full tax % as IGST regardless of state)
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-2 p-3 border rounded-md bg-muted/50">
+                  <input
+                    type="checkbox"
+                    id="showLowStockOnly"
+                    checked={showLowStockOnly}
+                    onChange={(e) => setShowLowStockOnly(e.target.checked)}
+                    className="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary cursor-pointer"
+                  />
+                  <Label htmlFor="showLowStockOnly" className="font-normal cursor-pointer text-sm">
+                    Show only low stock products
+                  </Label>
+                </div>
               </div>
 
               <div>
@@ -851,15 +955,47 @@ Total: ${formatIndianCurrency(po.total_amount)}`;
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__manual__">Manual Entry</SelectItem>
-                          {(() => {
-                            let filteredProducts = products;
-                            
-                            return filteredProducts.map((product) => (
-                              <SelectItem key={product.id} value={product.id}>
-                                {product.name} {(product.current_stock !== undefined) ? ` (Stock: ${product.current_stock})` : ''}
-                              </SelectItem>
-                            ));
-                          })()}
+                          {products.length === 0 ? (
+                            <div className="px-2 py-1.5 text-sm text-muted-foreground">
+                              No products found
+                            </div>
+                          ) : (
+                            products
+                              .filter(p => {
+                                // Strict filtering: ensure it's a product, not a supplier
+                                if (!p || !p.id || !p.name) return false;
+                                // Exclude if it has supplier-specific fields (this means it's from suppliers table)
+                                if (p.company_name || p.contact_person || p.email || p.phone) return false;
+                                // Exclude generic/test product names like "Product 141", "Product 142", etc.
+                                const productName = p.name.trim();
+                                const genericProductPattern = /^product\s+\d+$/i;
+                                if (genericProductPattern.test(productName)) return false;
+                                
+                                // Filter by selected supplier - only show products linked to the selected supplier
+                                // If a supplier is selected, only show products that are linked to that supplier
+                                // If no supplier is selected, show all products (including those without supplier_id)
+                                if (formData.supplier_id) {
+                                  // Only show products that match the selected supplier
+                                  // Products without supplier_id are excluded when a supplier is selected
+                                  if (p.supplier_id !== formData.supplier_id) return false;
+                                }
+                                
+                                // Filter by low stock if checkbox is checked
+                                if (showLowStockOnly) {
+                                  const currentStock = p.current_stock || 0;
+                                  const minStock = p.min_stock_level || 0;
+                                  if (currentStock > minStock) return false; // Only show if stock is at or below min level
+                                }
+                                
+                                // Ensure it has product-specific fields
+                                return p.name && (p.current_stock !== undefined || p.purchase_price !== undefined);
+                              })
+                              .map((product) => (
+                                <SelectItem key={product.id} value={product.id}>
+                                  {product.name} {(product.current_stock !== undefined) ? ` (Stock: ${product.current_stock})` : ''}
+                                </SelectItem>
+                              ))
+                          )}
                         </SelectContent>
                       </Select>
                     </div>
