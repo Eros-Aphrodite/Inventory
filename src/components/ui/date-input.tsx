@@ -67,7 +67,13 @@ const DateInput = React.forwardRef<HTMLInputElement, DateInputProps>(
             {displayValue || <span className="text-muted-foreground">{placeholder}</span>}
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-auto p-0 shadow-2xl" align="start">
+        <PopoverContent 
+          className="w-auto p-0 shadow-xl z-50" 
+          align="start" 
+          side="bottom"
+          sideOffset={4}
+          onOpenAutoFocus={(e) => e.preventDefault()}
+        >
           <Calendar
             mode="single"
             selected={selectedDate}
@@ -75,7 +81,7 @@ const DateInput = React.forwardRef<HTMLInputElement, DateInputProps>(
             initialFocus
             className="rounded-lg"
           />
-          <div className="flex items-center justify-between p-3 border-t border-border/50 bg-muted/30">
+          <div className="flex items-center justify-between p-2 border-t border-border">
             <Button
               variant="ghost"
               size="sm"
@@ -84,7 +90,7 @@ const DateInput = React.forwardRef<HTMLInputElement, DateInputProps>(
                 onChange?.("");
                 setOpen(false);
               }}
-              className="text-primary hover:text-primary hover:bg-primary/10 transition-colors"
+              className="h-8 text-xs text-primary hover:text-primary hover:bg-primary/10"
             >
               Clear
             </Button>
@@ -95,7 +101,7 @@ const DateInput = React.forwardRef<HTMLInputElement, DateInputProps>(
                 const today = new Date();
                 handleSelect(today);
               }}
-              className="text-primary hover:text-primary hover:bg-primary/10 transition-colors"
+              className="h-8 text-xs text-primary hover:text-primary hover:bg-primary/10"
             >
               Today
             </Button>

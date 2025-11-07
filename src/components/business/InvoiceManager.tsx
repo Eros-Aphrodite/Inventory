@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { DateInput } from "@/components/ui/date-input";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -71,6 +72,7 @@ interface BusinessEntity {
   email?: string;
   address?: string;
   gstin?: string;
+  created_at?: string;
 }
 
 interface Product {
@@ -124,6 +126,7 @@ export const InvoiceManager = () => {
   const { selectedCompany } = useCompany();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [hidePaidInvoices, setHidePaidInvoices] = useState(true);
   const [businessEntities, setBusinessEntities] = useState<BusinessEntity[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
@@ -267,10 +270,41 @@ export const InvoiceManager = () => {
         .from('business_entities')
         .select('*')
         .eq('user_id', user.id)
-        .order('name');
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setBusinessEntities(data || []);
+      
+      // Deduplicate business entities by name (case-insensitive) and entity_type
+      // Keep the most recently created one if duplicates exist
+      const seen = new Map<string, BusinessEntity>();
+      const entities = (data || []) as BusinessEntity[];
+      
+      for (const entity of entities) {
+        // Create a unique key from name (lowercase, trimmed) and entity_type
+        const key = `${entity.name.toLowerCase().trim()}_${entity.entity_type}`;
+        
+        // If we haven't seen this combination, or if this one is newer, keep it
+        if (!seen.has(key)) {
+          seen.set(key, entity);
+        } else {
+          // Compare creation dates if available
+          const existing = seen.get(key)!;
+          const existingDate = existing.created_at ? new Date(existing.created_at).getTime() : 0;
+          const currentDate = entity.created_at ? new Date(entity.created_at).getTime() : 0;
+          
+          // Keep the newer one
+          if (currentDate > existingDate) {
+            seen.set(key, entity);
+          }
+        }
+      }
+      
+      // Convert map values back to array and sort by name
+      const uniqueEntities = Array.from(seen.values()).sort((a, b) => 
+        a.name.localeCompare(b.name)
+      );
+      
+      setBusinessEntities(uniqueEntities);
     } catch (error) {
       console.error('Failed to load business entities:', error);
       toast({
@@ -870,43 +904,6 @@ export const InvoiceManager = () => {
           variant: "destructive"
         });
       }
-      
-      // Fetch company info from profile
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('business_entities')
-        .eq('id', (await supabase.auth.getUser()).data.user?.id)
-        .single();
-
-      const companyInfo = profileData?.business_entities?.[0] || {
-        company_name: "Your Company Name",
-        address: "Your Company Address",
-        owner_phone: "Your Phone",
-        gst: "Your GSTIN"
-      };
-
-      // Download PDF immediately after creation
-      const pdfDoc = (
-        <InvoicePDF 
-          invoice={invoice} 
-          items={itemsToInsert} 
-          companyInfo={{
-            name: companyInfo.company_name || "Your Company Name",
-            address: companyInfo.address || "Your Company Address",
-            phone: companyInfo.owner_phone || "Your Phone",
-            email: (await supabase.auth.getUser()).data.user?.email || "your@email.com",
-            gstin: companyInfo.gst || "Your GSTIN"
-          }}
-        />
-      );
-      
-      const blob = await pdf(pdfDoc).toBlob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `invoice-${invoice.invoice_number}.pdf`;
-      link.click();
-      URL.revokeObjectURL(url);
       
       resetForm();
       fetchInvoices();
@@ -1751,21 +1748,21 @@ export const InvoiceManager = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="invoice_date">Invoice Date</Label>
-                  <Input
+                  <DateInput
                     id="invoice_date"
-                    type="date"
                     value={formData.invoice_date}
-                    onChange={(e) => setFormData(prev => ({ ...prev, invoice_date: e.target.value }))}
+                    onChange={(value) => setFormData(prev => ({ ...prev, invoice_date: value }))}
+                    placeholder="Select invoice date"
                     required
                   />
                 </div>
                 <div>
                   <Label htmlFor="due_date">Due Date</Label>
-                  <Input
+                  <DateInput
                     id="due_date"
-                    type="date"
                     value={formData.due_date}
-                    onChange={(e) => setFormData(prev => ({ ...prev, due_date: e.target.value }))}
+                    onChange={(value) => setFormData(prev => ({ ...prev, due_date: value }))}
+                    placeholder="Select due date"
                   />
                 </div>
               </div>
@@ -2125,7 +2122,15 @@ export const InvoiceManager = () => {
           placeholder="Search by number, entity, type, status..."
           value={invoiceSearch}
           onChange={(e) => setInvoiceSearch(e.target.value)}
+          className="flex-1"
         />
+        <Button
+          variant={hidePaidInvoices ? "default" : "outline"}
+          size="sm"
+          onClick={() => setHidePaidInvoices(!hidePaidInvoices)}
+        >
+          {hidePaidInvoices ? "Show Paid" : "Hide Paid"}
+        </Button>
       </div>
 
       <div className="grid gap-4">
@@ -2139,6 +2144,12 @@ export const InvoiceManager = () => {
         ) : (
           invoices
             .filter((inv) => {
+              // Filter out paid invoices if hidePaidInvoices is true
+              if (hidePaidInvoices && inv.payment_status === 'paid') {
+                return false;
+              }
+              
+              // Search filter
               if (!invoiceSearch.trim()) return true;
               const term = invoiceSearch.toLowerCase();
               return (
@@ -2504,11 +2515,11 @@ export const InvoiceManager = () => {
                 </div>
                 <div>
                   <Label htmlFor="payment_date">Payment Date *</Label>
-                  <Input
+                  <DateInput
                     id="payment_date"
-                    type="date"
                     value={paymentData.payment_date}
-                    onChange={(e) => setPaymentData(prev => ({ ...prev, payment_date: e.target.value }))}
+                    onChange={(value) => setPaymentData(prev => ({ ...prev, payment_date: value }))}
+                    placeholder="Select payment date"
                     required
                   />
                 </div>
