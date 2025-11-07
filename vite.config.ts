@@ -9,6 +9,16 @@ export default defineConfig(({ mode }) => ({
     host: "::",
     port: 8080,
   },
+  build: {
+    assetsDir: "assets",
+    rollupOptions: {
+      output: {
+        assetFileNames: "assets/[name].[hash].[ext]",
+        chunkFileNames: "assets/[name].[hash].js",
+        entryFileNames: "assets/[name].[hash].js",
+      },
+    },
+  },
   plugins: [
     react(),
     mode === 'development' &&
