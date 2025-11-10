@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/table";
 import { pdf } from "@react-pdf/renderer";
 import { ReportPDF } from "@/components/pdf/ReportPDF";
+import { useCompany } from "@/contexts/CompanyContext";
 
 interface GSTData {
   id: string;
@@ -66,6 +67,7 @@ interface GSTBreakdown {
 }
 
 export const GSTTracker = () => {
+  const { selectedCompany } = useCompany();
   const [gstData, setGstData] = useState<GSTData[]>([]);
   const [loading, setLoading] = useState(true);
   const [dateFrom, setDateFrom] = useState("");
@@ -88,14 +90,28 @@ export const GSTTracker = () => {
   }, []);
 
   useEffect(() => {
-    if (dateFrom && dateTo) {
+    if (dateFrom && dateTo && selectedCompany) {
       fetchGSTData();
     }
-  }, [dateFrom, dateTo, entityType, invoiceType]);
+  }, [dateFrom, dateTo, entityType, invoiceType, selectedCompany]);
 
   const fetchGSTData = async () => {
     try {
       setLoading(true);
+      
+      // Check if company is selected
+      if (!selectedCompany?.company_name) {
+        setGstData([]);
+        setGstBreakdown({
+          cgst: 0,
+          sgst: 0,
+          igst: 0,
+          total: 0,
+          taxableAmount: 0
+        });
+        setLoading(false);
+        return;
+      }
       
       // Get user ID for filtering
       const { data: { user } } = await supabase.auth.getUser();
@@ -135,8 +151,14 @@ export const GSTTracker = () => {
         `)
         .eq('user_id', user.id)
         .gte('invoice_date', dateFrom)
-        .lte('invoice_date', dateTo)
-        .order('invoice_date', { ascending: false });
+        .lte('invoice_date', dateTo);
+      
+      // Filter by company_id to prevent showing old data from deleted companies
+      if (selectedCompany?.company_name) {
+        query = query.eq('invoices.company_id', selectedCompany.company_name);
+      }
+      
+      query = query.order('invoice_date', { ascending: false });
 
       if (invoiceType !== 'all') {
         // Map UI invoice type to gst_entries transaction_type
@@ -211,7 +233,13 @@ export const GSTTracker = () => {
         }
         
         // Use entity_name from gst_entries (it's already populated correctly)
-        const entityName = entry.entity_name || 'N/A';
+        // If entity_name is empty or null, try to get it from the invoice's related entity
+        let entityName = entry.entity_name;
+        if (!entityName || entityName.trim() === '' || entityName === 'Unknown' || entityName === 'N/A') {
+          // Try to get entity name from related tables if available
+          // For now, use the stored entity_name or fallback to 'Unknown'
+          entityName = entry.entity_name || 'Unknown';
+        }
         
         return {
           id: entry.id,
@@ -250,20 +278,24 @@ export const GSTTracker = () => {
       let totalTaxableAmount = 0;
 
       filteredData.forEach((entry: any) => {
-        // Check if this is a return transaction (should subtract from totals)
+        // Treat return/refund transactions as void - exclude them completely from calculations
         const isReturn = entry.transaction_type === 'sale_return' || entry.transaction_type === 'purchase_return';
-        const multiplier = isReturn ? -1 : 1; // Returns subtract, regular transactions add
         
-        totalTaxableAmount += (entry.taxable_amount || 0) * multiplier;
+        // Skip return/refund transactions entirely (treat as void)
+        if (isReturn) {
+          return; // Don't include in any calculations
+        }
+        
+        // Only process regular transactions (sales/purchases)
+        totalTaxableAmount += (entry.taxable_amount || 0);
         
         // Only sum CGST and SGST if IGST is 0 (intra-state transactions)
         // If IGST > 0, then CGST and SGST should be 0 (inter-state transactions)
-        // Returns subtract from totals, regular transactions add
         if ((entry.igst || 0) === 0) {
-          totalCGST += (entry.cgst || 0) * multiplier;
-          totalSGST += (entry.sgst || 0) * multiplier;
+          totalCGST += (entry.cgst || 0);
+          totalSGST += (entry.sgst || 0);
         }
-        totalIGST += (entry.igst || 0) * multiplier;
+        totalIGST += (entry.igst || 0);
       });
 
       setGstBreakdown({
@@ -522,34 +554,22 @@ export const GSTTracker = () => {
                   return invoice.invoice_items && invoice.invoice_items.some((item: any) => Math.round(item.gst_rate) === rate);
                 });
                 
-                // Separate regular transactions from returns
+                // Filter out return/refund transactions (treat as void)
                 const regularTransactions = rateData.filter(inv => {
                   const transType = (inv as any).transaction_type || inv.invoice_type;
                   return transType !== 'sale_return' && transType !== 'purchase_return';
                 });
-                const returnTransactions = rateData.filter(inv => {
-                  const transType = (inv as any).transaction_type || inv.invoice_type;
-                  return transType === 'sale_return' || transType === 'purchase_return';
-                });
                 
-                // Calculate totals: regular transactions add, returns subtract
-                const rateTotal = regularTransactions.reduce((sum, inv) => sum + inv.total_amount, 0) -
-                                  returnTransactions.reduce((sum, inv) => sum + inv.total_amount, 0);
-                const rateTaxable = regularTransactions.reduce((sum, inv) => sum + inv.subtotal, 0) -
-                                    returnTransactions.reduce((sum, inv) => sum + inv.subtotal, 0);
-                const rateTax = regularTransactions.reduce((sum, inv) => sum + inv.tax_amount, 0) -
-                                returnTransactions.reduce((sum, inv) => sum + inv.tax_amount, 0);
+                // Calculate totals: only include regular transactions (returns excluded as void)
+                const rateTotal = regularTransactions.reduce((sum, inv) => sum + inv.total_amount, 0);
+                const rateTaxable = regularTransactions.reduce((sum, inv) => sum + inv.subtotal, 0);
+                const rateTax = regularTransactions.reduce((sum, inv) => sum + inv.tax_amount, 0);
                 
                 return (
                   <div key={rate} className="bg-muted/30 rounded-lg p-4 text-center border">
                     <div className="text-2xl font-bold text-primary mb-2">{rate}%</div>
                     <div className="text-sm text-muted-foreground mb-1">
-                      {rateData.length} transaction{rateData.length !== 1 ? 's' : ''}
-                      {returnTransactions.length > 0 && (
-                        <span className="block text-xs text-red-600 mt-1">
-                          ({returnTransactions.length} return{returnTransactions.length !== 1 ? 's' : ''})
-                        </span>
-                      )}
+                      {regularTransactions.length} transaction{regularTransactions.length !== 1 ? 's' : ''}
                     </div>
                     <div className="text-xs text-muted-foreground mb-2">Taxable: {formatIndianCurrency(Math.max(0, rateTaxable))}</div>
                     <div className="font-medium text-lg mb-1">GST: {formatIndianCurrency(Math.max(0, rateTax))}</div>
@@ -573,7 +593,12 @@ export const GSTTracker = () => {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {loading ? (
+          {!selectedCompany?.company_name ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <AlertCircle className="h-12 w-12 mx-auto mb-4" />
+              <p>Please select a company to view GST data</p>
+            </div>
+          ) : loading ? (
             <div className="text-center py-8">Loading GST data...</div>
           ) : gstData.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
@@ -607,7 +632,7 @@ export const GSTTracker = () => {
                         {item.invoice_number}
                       </TableCell>
                       <TableCell>
-                        {item.business_entities?.name || item.suppliers?.company_name || 'N/A'}
+                        {item.business_entities?.name || item.suppliers?.company_name || item.entity_type ? 'Unknown' : 'N/A'}
                       </TableCell>
                       <TableCell>
                         <Badge 

@@ -1410,7 +1410,7 @@ Total: ${formatIndianCurrency(po.total_amount)}`;
 
       {/* Receiving Modal */}
       <Dialog open={showReceivingModal} onOpenChange={setShowReceivingModal}>
-        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto custom-scrollbar-dark smooth-scroll">
           <DialogHeader>
             <DialogTitle>Update Received Quantities - {selectedPO?.po_number}</DialogTitle>
           </DialogHeader>

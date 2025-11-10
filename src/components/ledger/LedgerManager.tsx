@@ -10,7 +10,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { useRoles } from "@/hooks/useRoles";
 import { useCompany } from "@/contexts/CompanyContext";
 import { 
   BookOpen, 
@@ -25,7 +24,8 @@ import {
   CheckCircle,
   Clock,
   MapPin,
-  Users
+  Users,
+  Trash2
 } from "lucide-react";
 import { formatIndianCurrency, getCurrentFinancialYear } from "@/utils/indianBusiness";
 import { StatCard } from "@/components/inventory/StatCard";
@@ -76,11 +76,11 @@ interface LedgerStats {
 
 export const LedgerManager = () => {
   const { selectedCompany } = useCompany();
-  const { isOwnerOrManager, hasPermission, loading: roleLoading } = useRoles();
   const [ledgers, setLedgers] = useState<Ledger[]>([]);
   const [ledgerEntries, setLedgerEntries] = useState<LedgerEntry[]>([]);
   const [selectedLedger, setSelectedLedger] = useState<string>("");
   const [selectedFinancialYear, setSelectedFinancialYear] = useState<string>("");
+  const [activeTab, setActiveTab] = useState<string>("ledgers");
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<LedgerStats>({
     totalLedgers: 0,
@@ -91,6 +91,10 @@ export const LedgerManager = () => {
   });
   const [showNewLedgerDialog, setShowNewLedgerDialog] = useState(false);
   const [showNewEntryDialog, setShowNewEntryDialog] = useState(false);
+  const [showDeleteLedgerDialog, setShowDeleteLedgerDialog] = useState(false);
+  const [showDeleteEntryDialog, setShowDeleteEntryDialog] = useState(false);
+  const [ledgerToDelete, setLedgerToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [entryToDelete, setEntryToDelete] = useState<string | null>(null);
   const [offlineEntries, setOfflineEntries] = useState<any[]>([]);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   
@@ -205,11 +209,11 @@ export const LedgerManager = () => {
   }, []);
 
   useEffect(() => {
-    if (!roleLoading && selectedFinancialYear) {
+    if (selectedFinancialYear) {
       fetchLedgers();
       loadOfflineEntries();
     }
-  }, [roleLoading, selectedFinancialYear, fetchLedgers, loadOfflineEntries]);
+  }, [selectedFinancialYear, fetchLedgers, loadOfflineEntries]);
 
   useEffect(() => {
     if (selectedLedger && activeTab === 'entries') {
@@ -278,15 +282,6 @@ export const LedgerManager = () => {
   }, [offlineEntries, toast, fetchLedgerEntries, fetchLedgers]);
 
   const createLedger = async () => {
-    if (!isOwnerOrManager()) {
-      toast({
-        title: "Access Denied",
-        description: "Only owners and managers can create ledgers",
-        variant: "destructive"
-      });
-      return;
-    }
-
     if (!selectedCompany) {
       toast({
         title: "No Company Selected",
@@ -420,6 +415,93 @@ export const LedgerManager = () => {
     }
   };
 
+  const handleDeleteEntryClick = (entryId: string) => {
+    setEntryToDelete(entryId);
+    setShowDeleteEntryDialog(true);
+  };
+
+  const deleteEntry = async (entryId: string) => {
+    try {
+      const { error } = await (supabase as any)
+        .from('ledger_entries')
+        .delete()
+        .eq('id', entryId);
+
+      if (error) throw error;
+
+      toast({ 
+        title: "Success", 
+        description: "Entry deleted successfully" 
+      });
+      fetchLedgerEntries();
+      fetchLedgers(); // Refresh to update balances
+      setShowDeleteEntryDialog(false);
+      setEntryToDelete(null);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to delete entry",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleDeleteLedgerClick = (ledgerId: string, ledgerName: string) => {
+    setLedgerToDelete({ id: ledgerId, name: ledgerName });
+    setShowDeleteLedgerDialog(true);
+  };
+
+  const deleteLedger = async () => {
+    if (!ledgerToDelete) return;
+
+    try {
+      // First check if ledger has entries
+      const { count } = await (supabase as any)
+        .from('ledger_entries')
+        .select('*', { count: 'exact', head: true })
+        .eq('ledger_id', ledgerToDelete.id);
+
+      if (count && count > 0) {
+        // Delete all entries first (cascade should handle this, but being explicit)
+        const { error: entriesError } = await (supabase as any)
+          .from('ledger_entries')
+          .delete()
+          .eq('ledger_id', ledgerToDelete.id);
+
+        if (entriesError) throw entriesError;
+      }
+
+      // Delete the ledger
+      const { error } = await (supabase as any)
+        .from('ledgers')
+        .delete()
+        .eq('id', ledgerToDelete.id);
+
+      if (error) throw error;
+
+      toast({ 
+        title: "Success", 
+        description: `Ledger "${ledgerToDelete.name}" deleted successfully` 
+      });
+      
+      // Clear selection if deleted ledger was selected
+      if (selectedLedger === ledgerToDelete.id) {
+        setSelectedLedger("");
+        setActiveTab("ledgers");
+      }
+      
+      fetchLedgers();
+      setShowDeleteLedgerDialog(false);
+      setLedgerToDelete(null);
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to delete ledger",
+        variant: "destructive"
+      });
+    }
+  };
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'paid': return <CheckCircle className="h-4 w-4 text-success" />;
@@ -437,22 +519,6 @@ export const LedgerManager = () => {
       default: return 'outline';
     }
   };
-
-  if (roleLoading) {
-    return <div className="text-center py-8">Loading...</div>;
-  }
-
-  if (!hasPermission('ledger_management') && !hasPermission('all')) {
-    return (
-      <div className="text-center py-8">
-        <AlertCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-        <h2 className="text-xl font-semibold mb-2">Access Restricted</h2>
-        <p className="text-muted-foreground">
-          Ledger management is only available for Owners and Managers.
-        </p>
-      </div>
-    );
-  }
 
   if (!selectedCompany) {
     return (
@@ -488,14 +554,13 @@ export const LedgerManager = () => {
           )}
         </div>
         <div className="flex gap-2">
-          {isOwnerOrManager() && (
-            <Dialog open={showNewLedgerDialog} onOpenChange={setShowNewLedgerDialog}>
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className="h-4 w-4 mr-2" />
-                  New Ledger
-                </Button>
-              </DialogTrigger>
+          <Dialog open={showNewLedgerDialog} onOpenChange={setShowNewLedgerDialog}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                New Ledger
+              </Button>
+            </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Create New Ledger</DialogTitle>
@@ -551,7 +616,6 @@ export const LedgerManager = () => {
                 </div>
               </DialogContent>
             </Dialog>
-          )}
         </div>
       </div>
 
@@ -642,14 +706,12 @@ export const LedgerManager = () => {
                 <div className="text-center py-8 text-muted-foreground">
                   <BookOpen className="h-12 w-12 mx-auto mb-4" />
                   <p>No ledgers found for {selectedFinancialYear}</p>
-                  {isOwnerOrManager() && (
-                    <Button 
-                      onClick={() => setShowNewLedgerDialog(true)}
-                      className="mt-4"
-                    >
-                      Create Your First Ledger
-                    </Button>
-                  )}
+                  <Button 
+                    onClick={() => setShowNewLedgerDialog(true)}
+                    className="mt-4"
+                  >
+                    Create Your First Ledger
+                  </Button>
                 </div>
               ) : (
                 <div className="rounded-md border">
@@ -691,19 +753,40 @@ export const LedgerManager = () => {
                           <TableCell className="text-right">
                             {ledger.entries_count}
                           </TableCell>
-                          <TableCell>
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedLedger(ledger.id);
-                                setActiveTab("entries");
-                                fetchLedgerEntries();
-                              }}
-                            >
-                              View Entries
-                            </Button>
+                          <TableCell onClick={(e) => e.stopPropagation()} style={{ width: '200px' }}>
+                            <div className="flex items-center gap-2">
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedLedger(ledger.id);
+                                  setActiveTab("entries");
+                                  fetchLedgerEntries();
+                                }}
+                              >
+                                View Entries
+                              </Button>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteLedgerClick(ledger.id, ledger.name);
+                                }}
+                                style={{ 
+                                  backgroundColor: '#ef4444', 
+                                  color: 'white',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}
+                                title="Delete ledger"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                <span>Delete</span>
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -725,7 +808,7 @@ export const LedgerManager = () => {
                     {selectedLedger ? `Managing entries for selected ledger` : 'Select a ledger to view entries'}
                   </CardDescription>
                 </div>
-                {selectedLedger && isOwnerOrManager() && (
+                {selectedLedger && (
                   <Dialog open={showNewEntryDialog} onOpenChange={setShowNewEntryDialog}>
                     <DialogTrigger asChild>
                       <Button>
@@ -851,19 +934,29 @@ export const LedgerManager = () => {
                               </div>
                             </TableCell>
                             <TableCell>
-                              <Select 
-                                value={entry.status}
-                                onValueChange={(value) => updateEntryStatus(entry.id, value)}
-                              >
-                                <SelectTrigger className="w-24">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="due">Due</SelectItem>
-                                  <SelectItem value="partial">Partial</SelectItem>
-                                  <SelectItem value="paid">Paid</SelectItem>
-                                </SelectContent>
-                              </Select>
+                              <div className="flex items-center gap-2">
+                                <Select 
+                                  value={entry.status}
+                                  onValueChange={(value) => updateEntryStatus(entry.id, value)}
+                                >
+                                  <SelectTrigger className="w-24">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="due">Due</SelectItem>
+                                    <SelectItem value="partial">Partial</SelectItem>
+                                    <SelectItem value="paid">Paid</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleDeleteEntryClick(entry.id)}
+                                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         ))}
@@ -881,6 +974,95 @@ export const LedgerManager = () => {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Delete Ledger Confirmation Modal */}
+      <Dialog open={showDeleteLedgerDialog} onOpenChange={setShowDeleteLedgerDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
+                <Trash2 className="h-6 w-6 text-destructive" />
+              </div>
+              <DialogTitle className="text-xl">Delete Ledger</DialogTitle>
+            </div>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground mb-4">
+              Are you sure you want to delete the ledger <span className="font-semibold text-foreground">"{ledgerToDelete?.name}"</span>?
+            </p>
+            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3 mb-4">
+              <p className="text-sm text-destructive font-medium">
+                ⚠️ This action cannot be undone
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                This will also delete all entries in this ledger permanently.
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowDeleteLedgerDialog(false);
+                setLedgerToDelete(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={deleteLedger}
+              className="flex items-center gap-2"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete Ledger
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Entry Confirmation Modal */}
+      <Dialog open={showDeleteEntryDialog} onOpenChange={setShowDeleteEntryDialog}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
+                <Trash2 className="h-6 w-6 text-destructive" />
+              </div>
+              <DialogTitle className="text-xl">Delete Entry</DialogTitle>
+            </div>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground mb-4">
+              Are you sure you want to delete this ledger entry?
+            </p>
+            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3 mb-4">
+              <p className="text-sm text-destructive font-medium">
+                ⚠️ This action cannot be undone
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowDeleteEntryDialog(false);
+                setEntryToDelete(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => entryToDelete && deleteEntry(entryToDelete)}
+              className="flex items-center gap-2"
+            >
+              <Trash2 className="h-4 w-4" />
+              Delete Entry
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

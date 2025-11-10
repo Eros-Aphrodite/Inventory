@@ -36,7 +36,7 @@ import { supabase } from "@/integrations/supabase/client";
 const ImportModal = lazy(() => import("@/components/inventory/ImportModal").then(m => ({ default: m.ImportModal })));
 const GSTCalculator = lazy(() => import("@/components/inventory/GSTCalculator").then(m => ({ default: m.GSTCalculator })));
 const GSTTracker = lazy(() => import("@/components/gst/GSTTracker").then(m => ({ default: m.GSTTracker })));
-const LedgerManager = lazy(() => import("@/components/ledger/EnhancedLedgerManager").then(m => ({ default: m.EnhancedLedgerManager })));
+const LedgerManager = lazy(() => import("@/components/ledger/LedgerManager").then(m => ({ default: m.LedgerManager })));
 const SuppliersManager = lazy(() => import("@/components/business/SuppliersManager").then(m => ({ default: m.SuppliersManager })));
 const ProductsManager = lazy(() => import("@/components/business/ProductsManager").then(m => ({ default: m.ProductsManager })));
 const InvoiceManager = lazy(() => import("@/components/business/InvoiceManager").then(m => ({ default: m.InvoiceManager })));

@@ -843,65 +843,74 @@ export const InvoiceManager = () => {
         console.log(`ℹ️ Skipping inventory update for ${formData.entity_type} invoice (${formData.invoice_type}) - inventory sync only applies to customer/supplier invoices`);
       }
 
-      // Create GST entry automatically (for all invoice types including returns)
-      try {
-        // Get entity details for GST calculation
-        const entityDetails = await GSTSyncService.getEntityDetails(
-          formData.entity_id || '', 
-          formData.entity_type as any
-        );
+      // Create GST entry automatically (skip for return/refund invoices - treat as void)
+      const isReturnInvoice = formData.invoice_type === 'sale_return' || formData.invoice_type === 'purchase_return';
+      
+      if (!isReturnInvoice) {
+        // Only create GST entries for regular invoices, not returns/refunds (void transactions)
+        try {
+          // Get entity details for GST calculation
+          const entityDetails = await GSTSyncService.getEntityDetails(
+            formData.entity_id || '', 
+            formData.entity_type as any
+          );
 
-        // Determine transaction type for GST entry
-        let gstTransactionType: 'sale' | 'purchase' | 'sale_return' | 'purchase_return' = 'sale';
-        if (formData.invoice_type === 'sales' || formData.invoice_type === 'sale_return') {
-          gstTransactionType = formData.invoice_type === 'sale_return' ? 'sale_return' : 'sale';
-        } else {
-          gstTransactionType = formData.invoice_type === 'purchase_return' ? 'purchase_return' : 'purchase';
-        }
+          // Determine transaction type for GST entry
+          let gstTransactionType: 'sale' | 'purchase' = 'sale';
+          if (formData.invoice_type === 'sales') {
+            gstTransactionType = 'sale';
+          } else {
+            gstTransactionType = 'purchase';
+          }
 
-        // For return invoices, GST amounts should be negative to represent refund/credit
-        const invoiceGSTData = {
-          invoice_id: invoice.id,
-          invoice_number: invoiceNumber,
-          invoice_date: formData.invoice_date,
-          transaction_type: gstTransactionType,
-          entity_name: entityDetails?.company_name || entityDetails?.name || (formData.entity_type === 'other' ? 'Miscellaneous' : 'Unknown'),
-          entity_id: formData.entity_id || '',
-          subtotal: totals.subtotal,
-          tax_amount: totals.taxAmount,
-          total_amount: totals.total,
-          from_state: entityDetails?.state || '27',
-          to_state: companyState,
-          forceIGST: forceIGST, // Pass the forceIGST flag
-          line_items: lineItems.map(item => ({
-            description: item.description,
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-            gst_rate: item.gst_rate,
-            line_total: item.quantity * item.unit_price
-          }))
-        };
+          const invoiceGSTData = {
+            invoice_id: invoice.id,
+            invoice_number: invoiceNumber,
+            invoice_date: formData.invoice_date,
+            transaction_type: gstTransactionType,
+            entity_name: entityDetails?.company_name || entityDetails?.name || (formData.entity_type === 'other' ? 'Miscellaneous' : 'Unknown'),
+            entity_id: formData.entity_id || '',
+            subtotal: totals.subtotal,
+            tax_amount: totals.taxAmount,
+            total_amount: totals.total,
+            from_state: entityDetails?.state || '27',
+            to_state: companyState,
+            forceIGST: forceIGST, // Pass the forceIGST flag
+            line_items: lineItems.map(item => ({
+              description: item.description,
+              quantity: item.quantity,
+              unit_price: item.unit_price,
+              gst_rate: item.gst_rate,
+              line_total: item.quantity * item.unit_price
+            }))
+          };
 
-        const gstResult = await GSTSyncService.createGSTEntryFromInvoice(invoiceGSTData);
-        if (gstResult.success) {
-          const isReturn = formData.invoice_type === 'sale_return' || formData.invoice_type === 'purchase_return';
-          toast({ 
-            title: "Success", 
-            description: `Invoice created${isReturn ? ' (return)' : ''} and GST entry ${isReturn ? 'refund' : ''} added successfully` 
-          });
-        } else {
+          const gstResult = await GSTSyncService.createGSTEntryFromInvoice(invoiceGSTData);
+          if (gstResult.success) {
+            toast({ 
+              title: "Success", 
+              description: "Invoice created and GST entry added successfully" 
+            });
+          } else {
+            toast({ 
+              title: "Warning", 
+              description: "Invoice created but GST entry failed: " + gstResult.error,
+              variant: "destructive"
+            });
+          }
+        } catch (gstError) {
+          console.error('GST sync error:', gstError);
           toast({ 
             title: "Warning", 
-            description: "Invoice created but GST entry failed: " + gstResult.error,
+            description: "Invoice created but GST entry failed",
             variant: "destructive"
           });
         }
-      } catch (gstError) {
-        console.error('GST sync error:', gstError);
+      } else {
+        // Return/refund invoice - treated as void, no GST entry created
         toast({ 
-          title: "Warning", 
-          description: "Invoice created but GST entry failed",
-          variant: "destructive"
+          title: "Success", 
+          description: "Return/Refund invoice created (treated as void - excluded from calculations)" 
         });
       }
       
@@ -1922,63 +1931,24 @@ export const InvoiceManager = () => {
                       <Label htmlFor={`description-${index}`} className="text-sm mb-1 block">
                         {formData.entity_type === 'customer' ? 'Description' : 'Item/Service Description'} <span className="text-destructive">*</span>
                       </Label>
-                      <div className="relative">
-                        <Input
-                          id={`description-${index}`}
-                          placeholder={formData.entity_type === 'customer' ? "Type item name or select from dropdown" : "Type any service/item name (e.g., Transport charges, Labour charges, Wholesale service, etc.)"}
-                          value={item.description}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            updateLineItem(index, 'description', value);
-                            
-                            // Auto-suggest product if typing matches an existing product
-                            if (value.trim() && products.length > 0) {
-                              const matchingProduct = products.find(p => 
-                                p.name.toLowerCase().includes(value.toLowerCase().trim())
-                              );
-                              
-                              if (matchingProduct && !item.product_id) {
-                                // Auto-fill price and GST if product found
-                                const updated = [...lineItems];
-                                updated[index] = {
-                                  ...updated[index],
-                                  product_id: matchingProduct.id,
-                                  unit_price: matchingProduct.selling_price || updated[index].unit_price,
-                                  gst_rate: matchingProduct.gst_rate || updated[index].gst_rate
-                                };
-                                setLineItems(updated);
-                              }
-                            }
-                          }}
-                          onFocus={(e) => e.target.select()}
-                          required
-                          className={!item.description ? "border-destructive" : ""}
-                          list={`product-suggestions-${index}`}
-                        />
-                        {formData.entity_type === 'customer' && products.length > 0 && (
-                          <datalist id={`product-suggestions-${index}`}>
-                            {products
-                              .filter(p => p.name.toLowerCase().includes(item.description.toLowerCase()) || item.description === '')
-                              .slice(0, 10)
-                              .map((product) => (
-                                <option key={product.id} value={product.name}>
-                                  {product.name} {product.selling_price ? `- ₹${product.selling_price}` : ''}
-                                </option>
-                              ))}
-                          </datalist>
-                        )}
-                      </div>
+                      <Input
+                        id={`description-${index}`}
+                        placeholder={formData.entity_type === 'customer' ? "Type item name or description" : "Type any service/item name (e.g., Transport charges, Labour charges, Wholesale service, etc.)"}
+                        value={item.description}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          updateLineItem(index, 'description', value);
+                        }}
+                        onFocus={(e) => e.target.select()}
+                        required
+                        className={!item.description ? "border-destructive" : ""}
+                      />
                       {!item.description && (
                         <p className="text-xs text-destructive mt-1">Description is required</p>
                       )}
                       {formData.entity_type !== 'customer' && (
                         <p className="text-xs text-muted-foreground mt-1">
                           Enter any service name, item description, or billing detail as needed
-                        </p>
-                      )}
-                      {formData.entity_type === 'customer' && item.description && !item.product_id && (
-                        <p className="text-xs text-blue-500 mt-1">
-                          💡 Tip: If this item exists in inventory, select it from the Product dropdown above to auto-fill price and GST
                         </p>
                       )}
                     </div>
@@ -2450,7 +2420,7 @@ export const InvoiceManager = () => {
 
       {/* Payment Dialog */}
       <Dialog open={showPaymentDialog} onOpenChange={setShowPaymentDialog}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto custom-scrollbar-dark">
           <DialogHeader>
             <DialogTitle>Record Payment - {selectedInvoice?.invoice_number}</DialogTitle>
           </DialogHeader>

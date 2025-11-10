@@ -198,22 +198,8 @@ export const ReportsManager: React.FC = () => {
             .gte('invoice_date', dateFrom)
             .lte('invoice_date', dateTo);
 
-          // Fetch returns to subtract from totals
-          const { data: saleReturns } = await supabase
-            .from('invoices')
-            .select('subtotal, tax_amount, total_amount')
-            .eq('company_id', selectedCompany.company_name)
-            .eq('invoice_type', 'sale_return')
-            .gte('invoice_date', dateFrom)
-            .lte('invoice_date', dateTo);
-
-          const { data: purchaseReturns } = await supabase
-            .from('invoices')
-            .select('subtotal, tax_amount, total_amount')
-            .eq('company_id', selectedCompany.company_name)
-            .eq('invoice_type', 'purchase_return')
-            .gte('invoice_date', dateFrom)
-            .lte('invoice_date', dateTo);
+          // Note: Return/refund invoices are treated as void and excluded from all calculations
+          // They are not fetched or included in any totals
 
           // Fetch sales invoice IDs first
           const salesInvoiceIds = (allSalesInvoices || []).map(inv => inv.id);
@@ -246,19 +232,16 @@ export const ReportsManager: React.FC = () => {
           }, 0);
 
           // Calculate total inventory cost including tax (opening stock + purchase tax)
-          const totalPurchases = (purchaseInvoices?.reduce((sum, inv) => sum + (inv.subtotal || 0), 0) || 0) -
-                                 (purchaseReturns?.reduce((sum, inv) => sum + (inv.subtotal || 0), 0) || 0);
-          const purchaseTax = (purchaseInvoices?.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0) || 0) -
-                              (purchaseReturns?.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0) || 0);
+          // Return/refund invoices are excluded (treated as void)
+          const totalPurchases = purchaseInvoices?.reduce((sum, inv) => sum + (inv.subtotal || 0), 0) || 0;
+          const purchaseTax = purchaseInvoices?.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0) || 0;
           
           // Total inventory cost including tax = Opening Stock + Purchase Tax
           const totalInventoryCostWithTax = openingStockCost + purchaseTax;
 
-          // Calculate total sales (all sales invoices)
-          const totalSales = (allSalesInvoices?.reduce((sum, inv) => sum + (inv.subtotal || 0), 0) || 0) -
-                            (saleReturns?.reduce((sum, inv) => sum + (inv.subtotal || 0), 0) || 0);
-          const salesTax = (allSalesInvoices?.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0) || 0) -
-                          (saleReturns?.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0) || 0);
+          // Calculate total sales (all sales invoices, excluding returns/refunds which are void)
+          const totalSales = allSalesInvoices?.reduce((sum, inv) => sum + (inv.subtotal || 0), 0) || 0;
+          const salesTax = allSalesInvoices?.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0) || 0;
           
           // Calculate total inventory selling price with tax
           const totalInventorySellingWithTax = (products || []).reduce((sum, product) => {
@@ -425,7 +408,7 @@ export const ReportsManager: React.FC = () => {
               suppliers(company_name)
             `)
             .eq('company_id', selectedCompany.company_name)
-            .in('invoice_type', ['sales', 'sale_return'])
+            .eq('invoice_type', 'sales') // Exclude sale_return (treated as void)
             .gte('invoice_date', dateFrom)
             .lte('invoice_date', dateTo)
             .order('invoice_date', { ascending: false });
@@ -441,11 +424,10 @@ export const ReportsManager: React.FC = () => {
 
           console.log('Sales report invoices found:', salesData?.length || 0);
 
-          // Separate regular sales and returns
-          const regularSales = (salesData || []).filter(inv => inv.invoice_type === 'sales');
-          const saleReturns = (salesData || []).filter(inv => inv.invoice_type === 'sale_return');
+          // Returns/refunds are excluded from queries (treated as void)
+          const regularSales = salesData || [];
 
-          // Map regular sales
+          // Map regular sales only (returns excluded as void)
           const salesRows = regularSales.map(inv => ({
             subcategory: inv.invoice_number || '',
             amount: inv.total_amount || 0,
@@ -459,29 +441,12 @@ export const ReportsManager: React.FC = () => {
             invoice_type: 'sales'
           }));
 
-          // Map return sales (negative amounts to show refund/credit)
-          const returnRows = saleReturns.map(inv => ({
-            subcategory: inv.invoice_number || '',
-            amount: -(inv.total_amount || 0), // Negative to show it's a return/refund
-            category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
-            invoice_number: inv.invoice_number,
-            invoice_date: inv.invoice_date,
-            customer: inv.business_entities?.name || inv.suppliers?.company_name || 'Miscellaneous',
-            subtotal: -(inv.subtotal || 0), // Negative subtotal
-            tax_amount: -(inv.tax_amount || 0), // Negative tax (GST refund)
-            payment_status: inv.payment_status || 'due',
-            invoice_type: 'sale_return'
-          }));
+          sampleData = [...salesRows];
 
-          sampleData = [...salesRows, ...returnRows];
-
-          // Calculate totals (sales - returns)
-          const totalSales = regularSales.reduce((sum, inv) => sum + (inv.subtotal || 0), 0) -
-                           saleReturns.reduce((sum, inv) => sum + (inv.subtotal || 0), 0);
-          const totalTax = regularSales.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0) -
-                          saleReturns.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0);
-          const totalAmount = regularSales.reduce((sum, inv) => sum + (inv.total_amount || 0), 0) -
-                             saleReturns.reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
+          // Calculate totals (only regular sales, returns excluded as void)
+          const totalSales = regularSales.reduce((sum, inv) => sum + (inv.subtotal || 0), 0);
+          const totalTax = regularSales.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0);
+          const totalAmount = regularSales.reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
 
           newSummary = {
             totalSales,
@@ -537,7 +502,7 @@ export const ReportsManager: React.FC = () => {
               business_entities(name)
             `)
             .eq('company_id', selectedCompany.company_name)
-            .in('invoice_type', ['purchase', 'purchase_return'])
+            .eq('invoice_type', 'purchase') // Exclude purchase_return (treated as void)
             .gte('invoice_date', dateFrom)
             .lte('invoice_date', dateTo)
             .order('invoice_date', { ascending: false });
@@ -577,9 +542,9 @@ export const ReportsManager: React.FC = () => {
             };
           });
 
-          // Map purchase invoices
+          // Map purchase invoices (exclude returns/refunds - treated as void)
           const regularPurchases = (purchaseInvoices || []).filter(inv => inv.invoice_type === 'purchase');
-          const purchaseReturns = (purchaseInvoices || []).filter(inv => inv.invoice_type === 'purchase_return');
+          // Note: purchaseReturns are excluded from calculations (treated as void)
 
           const purchaseInvoiceRows = regularPurchases.map(inv => ({
             subcategory: inv.invoice_number || '',
@@ -594,32 +559,16 @@ export const ReportsManager: React.FC = () => {
             record_type: 'Purchase Invoice'
           }));
 
-          // Map purchase returns (negative amounts to show refund/credit)
-          const returnInvoiceRows = purchaseReturns.map(inv => ({
-            subcategory: inv.invoice_number || '',
-            amount: -(inv.total_amount || 0), // Negative to show it's a return/refund
-            category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
-            invoice_number: inv.invoice_number,
-            invoice_date: inv.invoice_date,
-            supplier: inv.suppliers?.company_name || inv.business_entities?.name || 'Miscellaneous',
-            subtotal: -(inv.subtotal || 0), // Negative subtotal
-            tax_amount: -(inv.tax_amount || 0), // Negative tax (GST refund)
-            payment_status: inv.payment_status || 'due',
-            record_type: 'Purchase Return'
-          }));
+          // Return/refund invoices are excluded from sampleData and calculations (treated as void)
+          sampleData = [...poRows, ...purchaseInvoiceRows];
 
-          sampleData = [...poRows, ...purchaseInvoiceRows, ...returnInvoiceRows];
-
-          // Calculate totals
+          // Calculate totals (returns/refunds excluded - treated as void)
           const totalPO = (purchaseOrders || []).reduce((sum, po) => sum + (po.subtotal || 0), 0);
-          const totalPurchases = regularPurchases.reduce((sum, inv) => sum + (inv.subtotal || 0), 0) -
-                                purchaseReturns.reduce((sum, inv) => sum + (inv.subtotal || 0), 0);
+          const totalPurchases = regularPurchases.reduce((sum, inv) => sum + (inv.subtotal || 0), 0);
           const totalTax = (purchaseOrders || []).reduce((sum, po) => sum + (po.tax_amount || 0), 0) +
-                          regularPurchases.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0) -
-                          purchaseReturns.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0);
+                          regularPurchases.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0);
           const totalAmount = (purchaseOrders || []).reduce((sum, po) => sum + (po.total_amount || 0), 0) +
-                             regularPurchases.reduce((sum, inv) => sum + (inv.total_amount || 0), 0) -
-                             purchaseReturns.reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
+                             regularPurchases.reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
 
           newSummary = {
             totalSales: 0,
@@ -645,7 +594,7 @@ export const ReportsManager: React.FC = () => {
               suppliers(company_name)
             `)
             .eq('company_id', selectedCompany.company_name)
-            .in('invoice_type', ['sales', 'sale_return'])
+            .eq('invoice_type', 'sales') // Exclude sale_return (treated as void)
             .order('invoice_date', { ascending: false });
 
           if (agingError) {
@@ -934,38 +883,34 @@ export const ReportsManager: React.FC = () => {
               console.log(`Found ${gstData.length} GST entries for company ${selectedCompany.company_name}`);
             }
 
-          // Separate by transaction type
+          // Separate by transaction type (exclude returns/refunds - treat as void)
           const salesTransactions = (gstData || []).filter((g: any) => g.transaction_type === 'sale');
           const purchaseTransactions = (gstData || []).filter((g: any) => g.transaction_type === 'purchase');
-          const saleReturns = (gstData || []).filter((g: any) => g.transaction_type === 'sale_return');
-          const purchaseReturns = (gstData || []).filter((g: any) => g.transaction_type === 'purchase_return');
+          // Note: saleReturns and purchaseReturns are excluded from calculations (treated as void)
 
-          // Calculate CGST totals (sales - returns)
+          // Calculate CGST totals (only regular transactions, returns excluded as void)
           const salesCGST = salesTransactions.reduce((sum, g) => sum + (g.cgst || 0), 0);
           const purchaseCGST = purchaseTransactions.reduce((sum, g) => sum + (g.cgst || 0), 0);
-          const saleReturnCGST = saleReturns.reduce((sum, g) => sum + (g.cgst || 0), 0);
-          const purchaseReturnCGST = purchaseReturns.reduce((sum, g) => sum + (g.cgst || 0), 0);
-          const cgstTotal = salesCGST + purchaseCGST - saleReturnCGST - purchaseReturnCGST;
+          const cgstTotal = salesCGST + purchaseCGST;
 
-          // Calculate SGST totals
+          // Calculate SGST totals (only regular transactions, returns excluded as void)
           const salesSGST = salesTransactions.reduce((sum, g) => sum + (g.sgst || 0), 0);
           const purchaseSGST = purchaseTransactions.reduce((sum, g) => sum + (g.sgst || 0), 0);
-          const saleReturnSGST = saleReturns.reduce((sum, g) => sum + (g.sgst || 0), 0);
-          const purchaseReturnSGST = purchaseReturns.reduce((sum, g) => sum + (g.sgst || 0), 0);
-          const sgstTotal = salesSGST + purchaseSGST - saleReturnSGST - purchaseReturnSGST;
+          const sgstTotal = salesSGST + purchaseSGST;
 
-          // Calculate IGST totals
+          // Calculate IGST totals (only regular transactions, returns excluded as void)
           const salesIGST = salesTransactions.reduce((sum, g) => sum + (g.igst || 0), 0);
           const purchaseIGST = purchaseTransactions.reduce((sum, g) => sum + (g.igst || 0), 0);
-          const saleReturnIGST = saleReturns.reduce((sum, g) => sum + (g.igst || 0), 0);
-          const purchaseReturnIGST = purchaseReturns.reduce((sum, g) => sum + (g.igst || 0), 0);
-          const igstTotal = salesIGST + purchaseIGST - saleReturnIGST - purchaseReturnIGST;
+          const igstTotal = salesIGST + purchaseIGST;
 
           // Calculate total GST
           const totalGST = cgstTotal + sgstTotal + igstTotal;
 
-          // Map all GST entries for detailed view
-          sampleData = (gstData || []).map((g: any) => ({
+          // Map only regular GST entries for detailed view (exclude returns as void)
+          const regularGSTData = (gstData || []).filter((g: any) => 
+            g.transaction_type === 'sale' || g.transaction_type === 'purchase'
+          );
+          sampleData = regularGSTData.map((g: any) => ({
             subcategory: g.invoice_number || '',
             amount: g.total_gst || 0,
             category: g.transaction_type || '',
@@ -1061,7 +1006,7 @@ export const ReportsManager: React.FC = () => {
             .from('invoices')
             .select('invoice_number, invoice_date, total_amount, invoice_type, payment_status, suppliers(company_name), business_entities(name)')
             .eq('company_id', selectedCompany.company_name)
-            .in('invoice_type', ['purchase', 'purchase_return'])
+            .eq('invoice_type', 'purchase') // Exclude purchase_return (treated as void)
             .gte('invoice_date', dateFrom)
             .lte('invoice_date', dateTo)
             .order('invoice_date', { ascending: false });
@@ -1098,9 +1043,8 @@ export const ReportsManager: React.FC = () => {
               };
             });
 
-          // Map purchase invoices
-          const regularPurchases = (purchaseInvoices || []).filter(inv => inv.invoice_type === 'purchase');
-          const purchaseReturns = (purchaseInvoices || []).filter(inv => inv.invoice_type === 'purchase_return');
+          // Map purchase invoices (returns/refunds excluded - treated as void)
+          const regularPurchases = purchaseInvoices || [];
 
           const purchaseInvoiceRows = regularPurchases.map(inv => ({
             subcategory: inv.invoice_number || '',
@@ -1113,24 +1057,13 @@ export const ReportsManager: React.FC = () => {
             payment_status: inv.payment_status || 'due'
           }));
 
-          const purchaseReturnRows = purchaseReturns.map(inv => ({
-            subcategory: inv.invoice_number || '',
-            amount: -(inv.total_amount || 0),
-            category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
-            invoice_number: inv.invoice_number,
-            invoice_date: inv.invoice_date,
-            supplier: inv.suppliers?.company_name || inv.business_entities?.name || 'N/A',
-            record_type: 'Purchase Return',
-            payment_status: inv.payment_status || 'due'
-          }));
+          // Return/refund invoices are excluded (treated as void)
+          sampleData = [...payableEntries, ...receivableEntries, ...purchaseInvoiceRows];
 
-          sampleData = [...payableEntries, ...receivableEntries, ...purchaseInvoiceRows, ...purchaseReturnRows];
-
-          // Calculate totals
+          // Calculate totals (returns/refunds excluded - treated as void)
           const totalPayables = payableEntries.reduce((sum, e) => sum + (e.amount || 0), 0);
           const totalReceivables = receivableEntries.reduce((sum, e) => sum + (e.amount || 0), 0);
-          const totalPurchases = regularPurchases.reduce((sum, inv) => sum + (inv.total_amount || 0), 0) -
-                                purchaseReturns.reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
+          const totalPurchases = regularPurchases.reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
 
             newSummary = {
               totalSales: totalReceivables,
