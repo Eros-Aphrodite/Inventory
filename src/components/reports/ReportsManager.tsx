@@ -49,6 +49,8 @@ interface ReportRow {
   gst_type?: string;
   gst_rate?: number;
   payment_method?: string;
+  record_type?: string;
+  notes?: string;
 }
 
 interface ReportSummary {
@@ -66,7 +68,8 @@ const REPORT_TYPES = [
   { id: 'gst-report', name: 'GST Report', icon: <FileText className="h-4 w-4" /> },
   { id: 'payment-report', name: 'Payment Report', icon: <FileText className="h-4 w-4" /> },
   { id: 'ledger-summary', name: 'Ledger Summary', icon: <FileText className="h-4 w-4" /> },
-  { id: 'invoice-aging', name: 'Invoice Aging Report', icon: <BarChart3 className="h-4 w-4" /> }
+  { id: 'invoice-aging', name: 'Invoice Aging Report', icon: <BarChart3 className="h-4 w-4" /> },
+  { id: 'return-void-report', name: 'Return/Void Invoice Report', icon: <FileText className="h-4 w-4" /> }
 ];
 
 export const ReportsManager: React.FC = () => {
@@ -1210,6 +1213,114 @@ export const ReportsManager: React.FC = () => {
           }
           break;
         }
+
+        case 'return-void-report': {
+          // Fetch all return/refund invoices (treated as void but kept for record-keeping)
+          const { data: saleReturns, error: saleReturnsError } = await supabase
+            .from('invoices')
+            .select(`
+              id,
+              invoice_number,
+              invoice_date,
+              total_amount,
+              subtotal,
+              tax_amount,
+              payment_status,
+              notes,
+              business_entities(name),
+              suppliers(company_name),
+              customers(company_name)
+            `)
+            .eq('company_id', selectedCompany.company_name)
+            .eq('invoice_type', 'sale_return')
+            .gte('invoice_date', dateFrom)
+            .lte('invoice_date', dateTo)
+            .order('invoice_date', { ascending: false });
+
+          const { data: purchaseReturns, error: purchaseReturnsError } = await supabase
+            .from('invoices')
+            .select(`
+              id,
+              invoice_number,
+              invoice_date,
+              total_amount,
+              subtotal,
+              tax_amount,
+              payment_status,
+              notes,
+              business_entities(name),
+              suppliers(company_name),
+              customers(company_name)
+            `)
+            .eq('company_id', selectedCompany.company_name)
+            .eq('invoice_type', 'purchase_return')
+            .gte('invoice_date', dateFrom)
+            .lte('invoice_date', dateTo)
+            .order('invoice_date', { ascending: false });
+
+          if (saleReturnsError) {
+            console.error('Error fetching sale returns:', saleReturnsError);
+            toast({
+              title: "Error",
+              description: "Failed to fetch sale return invoices",
+              variant: "destructive"
+            });
+          }
+
+          if (purchaseReturnsError) {
+            console.error('Error fetching purchase returns:', purchaseReturnsError);
+            toast({
+              title: "Error",
+              description: "Failed to fetch purchase return invoices",
+              variant: "destructive"
+            });
+          }
+
+          // Map sale returns
+          const saleReturnRows = (saleReturns || []).map(inv => ({
+            subcategory: inv.invoice_number || '',
+            amount: inv.total_amount || 0,
+            category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
+            invoice_number: inv.invoice_number,
+            invoice_date: inv.invoice_date,
+            customer: inv.customers?.company_name || inv.business_entities?.name || 'Miscellaneous',
+            subtotal: inv.subtotal || 0,
+            tax_amount: inv.tax_amount || 0,
+            payment_status: inv.payment_status || 'due',
+            record_type: 'Sale Return (Void)',
+            notes: inv.notes || ''
+          }));
+
+          // Map purchase returns
+          const purchaseReturnRows = (purchaseReturns || []).map(inv => ({
+            subcategory: inv.invoice_number || '',
+            amount: inv.total_amount || 0,
+            category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
+            invoice_number: inv.invoice_number,
+            invoice_date: inv.invoice_date,
+            supplier: inv.suppliers?.company_name || inv.business_entities?.name || 'Miscellaneous',
+            subtotal: inv.subtotal || 0,
+            tax_amount: inv.tax_amount || 0,
+            payment_status: inv.payment_status || 'due',
+            record_type: 'Purchase Return (Void)',
+            notes: inv.notes || ''
+          }));
+
+          sampleData = [...saleReturnRows, ...purchaseReturnRows];
+
+          // Calculate totals for summary
+          const totalSaleReturns = saleReturnRows.reduce((sum, inv) => sum + (inv.amount || 0), 0);
+          const totalPurchaseReturns = purchaseReturnRows.reduce((sum, inv) => sum + (inv.amount || 0), 0);
+          const totalReturnAmount = totalSaleReturns + totalPurchaseReturns;
+
+          newSummary = {
+            totalSales: totalSaleReturns,
+            totalPurchases: totalPurchaseReturns,
+            grossProfit: 0, // Returns are void, no profit impact
+            netProfit: totalReturnAmount
+          };
+          break;
+        }
         
         default: {
           sampleData = [];
@@ -1345,7 +1456,7 @@ export const ReportsManager: React.FC = () => {
                 />
               </div>
             </div>
-            <div className="flex items-end gap-2">
+            <div className="flex items-end gap-2 flex-nowrap">
               <Button
                 type="button"
                 onClick={() => {
@@ -1354,14 +1465,16 @@ export const ReportsManager: React.FC = () => {
                   setDateTo(range.to);
                 }}
                 variant="outline"
-                className="flex-1"
+                size="sm"
+                className="whitespace-nowrap text-xs px-3 flex-shrink-0"
               >
                 Current Month
               </Button>
               <Button
                 type="button"
                 onClick={() => generateReport()}
-                className="flex-1"
+                size="sm"
+                className="whitespace-nowrap text-xs px-3 flex-shrink-0"
               >
                 Refresh Report
               </Button>
@@ -1387,6 +1500,7 @@ export const ReportsManager: React.FC = () => {
                     {selectedReport === 'payment-report' && 'Payment Report'}
                     {selectedReport === 'ledger-summary' && 'Ledger Summary'}
                     {selectedReport === 'invoice-aging' && 'Invoice Aging Report'}
+                    {selectedReport === 'return-void-report' && 'Return/Void Invoice Report'}
                     {selectedCompany && (
                       <span className="text-muted-foreground font-normal text-base ml-2">
                         ({selectedCompany.company_name})
@@ -1482,6 +1596,19 @@ export const ReportsManager: React.FC = () => {
                         <TableHead className="text-right">Debits</TableHead>
                         <TableHead className="text-right">Credits</TableHead>
                         <TableHead className="text-right">Closing Balance</TableHead>
+                      </>
+                    )}
+                    {selectedReport === 'return-void-report' && (
+                      <>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Invoice #</TableHead>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Customer/Supplier</TableHead>
+                        <TableHead className="text-right">Subtotal</TableHead>
+                        <TableHead className="text-right">Tax</TableHead>
+                        <TableHead className="text-right">Total</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Notes</TableHead>
                       </>
                     )}
                     {selectedReport === 'invoice-aging' && (
@@ -1610,6 +1737,29 @@ export const ReportsManager: React.FC = () => {
                           <TableCell className="text-right">{formatIndianCurrency(Number(row.closing_balance) || 0)}</TableCell>
                         </>
                       )}
+                      {selectedReport === 'return-void-report' && (
+                        <>
+                          <TableCell>
+                            <Badge variant="destructive" className="text-xs">
+                              {(row as any).record_type || 'Void'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="font-medium">{row.invoice_number || row.subcategory}</TableCell>
+                          <TableCell>{row.invoice_date ? formatDate(row.invoice_date) : row.category}</TableCell>
+                          <TableCell>{row.customer || row.supplier || 'N/A'}</TableCell>
+                          <TableCell className="text-right">{formatIndianCurrency(row.subtotal || 0)}</TableCell>
+                          <TableCell className="text-right">{formatIndianCurrency(row.tax_amount || 0)}</TableCell>
+                          <TableCell className="text-right text-red-500">{formatIndianCurrency(row.amount || 0)}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-destructive">
+                              {(row as any).record_type?.includes('Void') ? 'Void' : row.payment_status || 'due'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="max-w-xs truncate" title={(row as any).notes || ''}>
+                            {(row as any).notes || '-'}
+                          </TableCell>
+                        </>
+                      )}
                       {selectedReport === 'invoice-aging' && (
                         <>
                           <TableCell className="font-medium">{row.invoice_number || row.subcategory}</TableCell>
@@ -1712,6 +1862,35 @@ export const ReportsManager: React.FC = () => {
                       <p className={`text-lg font-semibold ${summary.netProfit < 0 ? 'text-red-500' : summary.netProfit > 0 ? 'text-blue-500' : 'text-green-500'}`}>
                         {formatIndianCurrency(Math.abs(summary.netProfit))}
                         {summary.netProfit !== 0 && (summary.netProfit < 0 ? ' (Dr)' : ' (Cr)')}
+                      </p>
+                    </div>
+                  </>
+                )}
+                
+                {selectedReport === 'return-void-report' && (
+                  <>
+                    <div className="text-center">
+                      <p className="text-sm text-muted-foreground">Sale Returns</p>
+                      <p className="text-lg font-semibold text-red-500">
+                        {formatIndianCurrency(summary.totalSales)}
+                      </p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm text-muted-foreground">Purchase Returns</p>
+                      <p className="text-lg font-semibold text-red-500">
+                        {formatIndianCurrency(summary.totalPurchases)}
+                      </p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm text-muted-foreground">Total Returns</p>
+                      <p className="text-lg font-semibold text-red-500">
+                        {formatIndianCurrency(summary.netProfit)}
+                      </p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm text-muted-foreground">Total Records</p>
+                      <p className="text-lg font-semibold">
+                        {reportData.length}
                       </p>
                     </div>
                   </>
