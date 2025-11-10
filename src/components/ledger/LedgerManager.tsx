@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { formatIndianCurrency, getCurrentFinancialYear } from "@/utils/indianBusiness";
 import { StatCard } from "@/components/inventory/StatCard";
+import { DateInput } from "@/components/ui/date-input";
 import { 
   Table,
   TableBody,
@@ -184,21 +185,38 @@ export const LedgerManager = () => {
   }, [selectedFinancialYear, selectedCompany, calculateStats, toast]);
 
   const fetchLedgerEntries = useCallback(async () => {
+    if (!selectedLedger) {
+      setLedgerEntries([]);
+      return;
+    }
+
     try {
+      const { data: userData } = await supabase.auth.getUser();
+      if (!userData.user) {
+        throw new Error('User not authenticated');
+      }
+
       const { data, error } = await (supabase as any)
         .from('ledger_entries')
         .select('*')
         .eq('ledger_id', selectedLedger)
+        .eq('user_id', userData.user.id)
         .order('entry_date', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Error fetching ledger entries:', error);
+        throw error;
+      }
+      
       setLedgerEntries(data || []);
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Failed to load ledger entries:', error);
       toast({
         title: "Error",
-        description: "Failed to load ledger entries",
+        description: error?.message || "Failed to load ledger entries",
         variant: "destructive"
       });
+      setLedgerEntries([]);
     }
   }, [selectedLedger, toast]);
 
@@ -678,15 +696,19 @@ export const LedgerManager = () => {
       </div>
 
       {/* Ledger Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+      <Tabs value={activeTab} onValueChange={(value) => {
+        setActiveTab(value);
+        if (value === "ledgers") {
+          setSelectedLedger("");
+        } else if (value === "entries" && selectedLedger) {
+          fetchLedgerEntries();
+        }
+      }} className="space-y-4">
         <TabsList>
-          <TabsTrigger value="ledgers" onClick={() => {
-            setActiveTab("ledgers");
-            setSelectedLedger("");
-          }}>
+          <TabsTrigger value="ledgers">
             Ledgers
           </TabsTrigger>
-          <TabsTrigger value="entries" disabled={!selectedLedger} onClick={() => selectedLedger && setActiveTab("entries")}>
+          <TabsTrigger value="entries" disabled={!selectedLedger}>
             Entries {selectedLedger && `(${ledgerEntries.length})`}
           </TabsTrigger>
         </TabsList>
@@ -731,7 +753,15 @@ export const LedgerManager = () => {
                         <TableRow 
                           key={ledger.id}
                           className="cursor-pointer hover:bg-muted/50"
-                          onClick={() => setSelectedLedger(ledger.id)}
+                          onClick={(e) => {
+                            // Only select ledger if clicking on the row itself, not on buttons
+                            if ((e.target as HTMLElement).closest('button')) {
+                              return;
+                            }
+                            setSelectedLedger(ledger.id);
+                            setActiveTab("entries");
+                            fetchLedgerEntries();
+                          }}
                         >
                           <TableCell className="font-medium">
                             {ledger.name}
@@ -768,23 +798,17 @@ export const LedgerManager = () => {
                                 View Entries
                               </Button>
                               <Button
-                                variant="destructive"
+                                variant="ghost"
                                 size="sm"
                                 onClick={(e) => {
                                   e.stopPropagation();
+                                  e.preventDefault();
                                   handleDeleteLedgerClick(ledger.id, ledger.name);
                                 }}
-                                style={{ 
-                                  backgroundColor: '#ef4444', 
-                                  color: 'white',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '4px'
-                                }}
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
                                 title="Delete ledger"
                               >
                                 <Trash2 className="h-4 w-4" />
-                                <span>Delete</span>
                               </Button>
                             </div>
                           </TableCell>
@@ -823,10 +847,10 @@ export const LedgerManager = () => {
                       <div className="space-y-4">
                         <div>
                           <Label>Entry Date</Label>
-                          <Input
-                            type="date"
+                          <DateInput
                             value={newEntry.entry_date}
-                            onChange={(e) => setNewEntry({...newEntry, entry_date: e.target.value})}
+                            onChange={(value) => setNewEntry({...newEntry, entry_date: value})}
+                            placeholder="Select entry date"
                           />
                         </div>
                         <div>

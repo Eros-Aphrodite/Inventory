@@ -47,7 +47,7 @@ const DateInput = React.forwardRef<HTMLInputElement, DateInputProps>(
       }
     };
 
-    const displayValue = selectedDate ? format(selectedDate, "MM/dd/yyyy") : "";
+    const displayValue = selectedDate ? format(selectedDate, "dd/MM/yyyy") : "";
 
     return (
       <Popover open={open} onOpenChange={setOpen}>
@@ -90,7 +90,7 @@ const DateInput = React.forwardRef<HTMLInputElement, DateInputProps>(
                 onChange?.("");
                 setOpen(false);
               }}
-              className="h-8 text-xs text-primary hover:text-primary hover:bg-primary/10"
+              className="h-8 text-xs text-blue-500 hover:text-blue-600 hover:bg-blue-500/10"
             >
               Clear
             </Button>
@@ -101,7 +101,7 @@ const DateInput = React.forwardRef<HTMLInputElement, DateInputProps>(
                 const today = new Date();
                 handleSelect(today);
               }}
-              className="h-8 text-xs text-primary hover:text-primary hover:bg-primary/10"
+              className="h-8 text-xs text-blue-500 hover:text-blue-600 hover:bg-blue-500/10"
             >
               Today
             </Button>
