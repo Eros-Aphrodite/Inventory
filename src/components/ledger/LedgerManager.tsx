@@ -123,17 +123,48 @@ export const LedgerManager = () => {
     setOfflineEntries(stored);
   }, []);
 
-  const calculateStats = useCallback((ledgerData: Ledger[]) => {
+  const calculateStats = useCallback(async (ledgerData: Ledger[]) => {
     const totalBalance = ledgerData.reduce((sum, ledger) => sum + ledger.current_balance, 0);
+    
+    // Calculate entry stats from all ledger entries for the selected financial year
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      if (userData.user && selectedFinancialYear) {
+        const ledgerIds = ledgerData.map(l => l.id);
+        if (ledgerIds.length > 0) {
+          const { data: allEntries } = await (supabase as any)
+            .from('ledger_entries')
+            .select('status')
+            .in('ledger_id', ledgerIds)
+            .eq('user_id', userData.user.id)
+            .eq('financial_year', selectedFinancialYear);
+
+          const paidEntries = (allEntries || []).filter((e: any) => e.status === 'paid').length;
+          const dueEntries = (allEntries || []).filter((e: any) => e.status === 'due').length;
+          const partialEntries = (allEntries || []).filter((e: any) => e.status === 'partial').length;
+
+          setStats({
+            totalLedgers: ledgerData.length,
+            totalBalance,
+            paidEntries,
+            dueEntries,
+            partialEntries
+          });
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('Error calculating stats:', error);
+    }
     
     setStats({
       totalLedgers: ledgerData.length,
       totalBalance,
-      paidEntries: 0, // Will be calculated from actual entries
+      paidEntries: 0,
       dueEntries: 0,
       partialEntries: 0
     });
-  }, []);
+  }, [selectedFinancialYear]);
 
   const fetchLedgers = useCallback(async () => {
     if (!selectedCompany) {
@@ -172,7 +203,7 @@ export const LedgerManager = () => {
       }));
 
       setLedgers(ledgersWithCount);
-      calculateStats(ledgersWithCount);
+      await calculateStats(ledgersWithCount);
     } catch (error) {
       toast({
         title: "Error",
@@ -201,6 +232,7 @@ export const LedgerManager = () => {
         .select('*')
         .eq('ledger_id', selectedLedger)
         .eq('user_id', userData.user.id)
+        .eq('financial_year', selectedFinancialYear)
         .order('entry_date', { ascending: false });
 
       if (error) {
@@ -218,7 +250,7 @@ export const LedgerManager = () => {
       });
       setLedgerEntries([]);
     }
-  }, [selectedLedger, toast]);
+  }, [selectedLedger, selectedFinancialYear, toast]);
 
   // Effects
   useEffect(() => {
@@ -389,8 +421,8 @@ export const LedgerManager = () => {
         if (error) throw error;
 
         toast({ title: "Success", description: "Entry created successfully" });
+        await fetchLedgers(); // Refresh to update balances and stats
         fetchLedgerEntries();
-        fetchLedgers(); // Refresh to update balances
       } catch (error) {
         toast({
           title: "Error",
@@ -423,6 +455,7 @@ export const LedgerManager = () => {
         title: "Success", 
         description: `Entry marked as ${newStatus}` 
       });
+      await fetchLedgers(); // Refresh stats
       fetchLedgerEntries();
     } catch (error) {
       toast({
@@ -451,8 +484,8 @@ export const LedgerManager = () => {
         title: "Success", 
         description: "Entry deleted successfully" 
       });
+      await fetchLedgers(); // Refresh to update balances and stats
       fetchLedgerEntries();
-      fetchLedgers(); // Refresh to update balances
       setShowDeleteEntryDialog(false);
       setEntryToDelete(null);
     } catch (error) {
@@ -952,7 +985,14 @@ export const LedgerManager = () => {
                             <TableCell>
                               <div className="flex items-center gap-2">
                                 {getStatusIcon(entry.status)}
-                                <Badge variant={getStatusColor(entry.status)}>
+                                <Badge 
+                                  variant={getStatusColor(entry.status)}
+                                  className={
+                                    entry.status === 'due' 
+                                      ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' 
+                                      : ''
+                                  }
+                                >
                                   {entry.status.toUpperCase()}
                                 </Badge>
                               </div>
