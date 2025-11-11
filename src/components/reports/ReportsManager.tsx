@@ -28,6 +28,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { ReportPDF } from '@/components/pdf/ReportPDF';
+import { pdf } from '@react-pdf/renderer';
+import { downloadReportAsCSV } from '@/utils/pdfGenerator';
 
 interface ReportRow {
   subcategory: string;
@@ -1378,11 +1381,213 @@ export const ReportsManager: React.FC = () => {
     });
   };
 
-  const exportReport = (format: 'pdf' | 'excel') => {
-    toast({
-      title: "Export Started",
-      description: `Exporting report as ${format.toUpperCase()}...`
-    });
+  const exportReport = async (format: 'pdf' | 'excel') => {
+    if (reportData.length === 0) {
+      toast({
+        title: "No Data",
+        description: "Please generate a report first",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      const reportType = REPORT_TYPES.find(r => r.id === selectedReport);
+      const reportTitle = reportType?.name || 'Report';
+      const subtitle = `${selectedCompany?.company_name || 'Company'} - ${dateFrom} to ${dateTo}`;
+
+      if (format === 'pdf') {
+        // Define columns based on report type
+        let columns: { key: string; label: string; width: string; align?: 'left' | 'center' | 'right'; format?: 'currency' | 'number' | 'date' | 'text' }[] = [];
+        let formattedData: any[] = [];
+
+        switch (selectedReport) {
+          case 'profit-loss':
+            columns = [
+              { key: 'category', label: 'Category', width: '30%', align: 'left' },
+              { key: 'subcategory', label: 'Subcategory', width: '40%', align: 'left' },
+              { key: 'amount', label: 'Amount', width: '30%', align: 'right', format: 'currency' }
+            ];
+            formattedData = reportData.map(row => ({
+              category: row.category || '',
+              subcategory: row.subcategory || '',
+              amount: row.amount || 0
+            }));
+            break;
+
+          case 'return-void-report':
+            columns = [
+              { key: 'record_type', label: 'Type', width: '15%', align: 'left' },
+              { key: 'invoice_number', label: 'Invoice #', width: '15%', align: 'left' },
+              { key: 'invoice_date', label: 'Date', width: '12%', align: 'left', format: 'date' },
+              { key: 'customer_supplier', label: 'Customer/Supplier', width: '18%', align: 'left' },
+              { key: 'subtotal', label: 'Subtotal', width: '12%', align: 'right', format: 'currency' },
+              { key: 'tax_amount', label: 'Tax', width: '10%', align: 'right', format: 'currency' },
+              { key: 'amount', label: 'Total', width: '12%', align: 'right', format: 'currency' },
+              { key: 'payment_status', label: 'Status', width: '6%', align: 'left' }
+            ];
+            formattedData = reportData.map(row => ({
+              record_type: (row as any).record_type || 'Void',
+              invoice_number: row.invoice_number || row.subcategory || '',
+              invoice_date: row.invoice_date || row.category || '',
+              customer_supplier: row.customer || row.supplier || 'N/A',
+              subtotal: row.subtotal || 0,
+              tax_amount: row.tax_amount || 0,
+              amount: row.amount || 0,
+              payment_status: row.payment_status || 'due'
+            }));
+            break;
+
+          case 'sales-report':
+            columns = [
+              { key: 'invoice_number', label: 'Invoice #', width: '15%', align: 'left' },
+              { key: 'invoice_date', label: 'Date', width: '12%', align: 'left', format: 'date' },
+              { key: 'customer', label: 'Customer', width: '20%', align: 'left' },
+              { key: 'subtotal', label: 'Subtotal', width: '15%', align: 'right', format: 'currency' },
+              { key: 'tax_amount', label: 'Tax', width: '12%', align: 'right', format: 'currency' },
+              { key: 'amount', label: 'Total', width: '15%', align: 'right', format: 'currency' },
+              { key: 'payment_status', label: 'Status', width: '11%', align: 'left' }
+            ];
+            formattedData = reportData.map(row => ({
+              invoice_number: row.invoice_number || row.subcategory || '',
+              invoice_date: row.invoice_date || row.category || '',
+              customer: row.customer || 'N/A',
+              subtotal: row.subtotal || 0,
+              tax_amount: row.tax_amount || 0,
+              amount: row.amount || 0,
+              payment_status: row.payment_status || 'due'
+            }));
+            break;
+
+          case 'purchase-report':
+            columns = [
+              { key: 'po_number', label: 'PO #', width: '15%', align: 'left' },
+              { key: 'invoice_date', label: 'Date', width: '12%', align: 'left', format: 'date' },
+              { key: 'supplier', label: 'Supplier', width: '20%', align: 'left' },
+              { key: 'subtotal', label: 'Subtotal', width: '15%', align: 'right', format: 'currency' },
+              { key: 'tax_amount', label: 'Tax', width: '12%', align: 'right', format: 'currency' },
+              { key: 'amount', label: 'Total', width: '15%', align: 'right', format: 'currency' },
+              { key: 'status', label: 'Status', width: '11%', align: 'left' }
+            ];
+            formattedData = reportData.map(row => ({
+              po_number: row.po_number || row.subcategory || '',
+              invoice_date: row.invoice_date || row.category || '',
+              supplier: row.supplier || 'N/A',
+              subtotal: row.subtotal || 0,
+              tax_amount: row.tax_amount || 0,
+              amount: row.amount || 0,
+              status: row.status || 'draft'
+            }));
+            break;
+
+          case 'trial-balance':
+            columns = [
+              { key: 'subcategory', label: 'Account', width: '30%', align: 'left' },
+              { key: 'category', label: 'Type', width: '20%', align: 'left' },
+              { key: 'opening_balance', label: 'Opening', width: '15%', align: 'right', format: 'currency' },
+              { key: 'debits', label: 'Debits', width: '12%', align: 'right', format: 'currency' },
+              { key: 'credits', label: 'Credits', width: '12%', align: 'right', format: 'currency' },
+              { key: 'closing_balance', label: 'Closing', width: '11%', align: 'right', format: 'currency' }
+            ];
+            formattedData = reportData.map((row: any) => ({
+              subcategory: row.subcategory || '',
+              category: row.category || '',
+              opening_balance: Number(row.opening_balance) || 0,
+              debits: Number(row.debits) || 0,
+              credits: Number(row.credits) || 0,
+              closing_balance: Number(row.closing_balance) || 0
+            }));
+            break;
+
+          case 'invoice-aging':
+            columns = [
+              { key: 'invoice_number', label: 'Invoice #', width: '15%', align: 'left' },
+              { key: 'customer', label: 'Customer', width: '20%', align: 'left' },
+              { key: 'age_category', label: 'Age Category', width: '15%', align: 'left' },
+              { key: 'total_amount', label: 'Total', width: '12%', align: 'right', format: 'currency' },
+              { key: 'total_paid', label: 'Paid', width: '12%', align: 'right', format: 'currency' },
+              { key: 'amount_due', label: 'Pending', width: '12%', align: 'right', format: 'currency' },
+              { key: 'due_date', label: 'Due Date', width: '14%', align: 'left', format: 'date' }
+            ];
+            formattedData = reportData.map(row => ({
+              invoice_number: row.invoice_number || row.subcategory || '',
+              customer: row.customer || 'N/A',
+              age_category: row.age_category || row.category || '0-30 days',
+              total_amount: row.total_amount || row.amount || 0,
+              total_paid: (row as any).total_paid || 0,
+              amount_due: (row as any).amount_due || row.amount || 0,
+              due_date: row.due_date || row.expiration_date || ''
+            }));
+            break;
+
+          default:
+            // Generic report format
+            columns = [
+              { key: 'subcategory', label: 'Item', width: '40%', align: 'left' },
+              { key: 'category', label: 'Category', width: '30%', align: 'left' },
+              { key: 'amount', label: 'Amount', width: '30%', align: 'right', format: 'currency' }
+            ];
+            formattedData = reportData.map(row => ({
+              subcategory: row.subcategory || '',
+              category: row.category || '',
+              amount: row.amount || 0
+            }));
+        }
+
+        // Create summary array
+        const summaryItems = [];
+        if (summary.totalSales !== 0) {
+          summaryItems.push({ label: 'Total Sales', value: summary.totalSales, format: 'currency' as const });
+        }
+        if (summary.totalPurchases !== 0) {
+          summaryItems.push({ label: 'Total Purchases', value: summary.totalPurchases, format: 'currency' as const });
+        }
+        if (summary.grossProfit !== 0) {
+          summaryItems.push({ label: 'Gross Profit', value: summary.grossProfit, format: 'currency' as const });
+        }
+        if (summary.netProfit !== 0) {
+          summaryItems.push({ label: 'Net Profit', value: summary.netProfit, format: 'currency' as const });
+        }
+
+        const reportDataForPDF = {
+          title: reportTitle,
+          subtitle: subtitle,
+          generatedDate: new Date(),
+          data: formattedData,
+          columns: columns,
+          summary: summaryItems.length > 0 ? summaryItems : undefined
+        };
+
+        const pdfDoc = <ReportPDF reportData={reportDataForPDF} />;
+        const blob = await pdf(pdfDoc).toBlob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${reportTitle.replace(/\s+/g, '-').toLowerCase()}-${dateFrom}-to-${dateTo}.pdf`;
+        link.click();
+        URL.revokeObjectURL(url);
+
+        toast({
+          title: "Success",
+          description: "Report exported as PDF"
+        });
+      } else {
+        // CSV export
+        const columns = reportData.length > 0 ? Object.keys(reportData[0]) : [];
+        downloadReportAsCSV(reportTitle, reportData, columns);
+        toast({
+          title: "Success",
+          description: "Report exported as CSV"
+        });
+      }
+    } catch (error) {
+      console.error('Error exporting report:', error);
+      toast({
+        title: "Error",
+        description: "Failed to export report",
+        variant: "destructive"
+      });
+    }
   };
 
   return (

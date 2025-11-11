@@ -15,6 +15,8 @@ import { Plus, ShoppingCart, Download, Edit, Trash2, Eye, Package } from "lucide
 import { formatIndianCurrency, calculateGST } from "@/utils/indianBusiness";
 import { downloadReportAsCSV } from "@/utils/pdfGenerator";
 import { POReceivingManager } from "./POReceivingManager";
+import { POPDF } from "@/components/pdf/POPDF";
+import { pdf } from "@react-pdf/renderer";
  
 
 interface PurchaseOrder {
@@ -30,6 +32,10 @@ interface PurchaseOrder {
   notes: string | null;
   suppliers?: {
     company_name: string;
+    address?: string;
+    phone?: string;
+    email?: string;
+    gstin?: string;
   };
   items_summary?: {
     total_items: number;
@@ -132,7 +138,11 @@ export const PurchaseOrderManager = () => {
         .select(`
           *,
           suppliers (
-            company_name
+            company_name,
+            address,
+            phone,
+            email,
+            gstin
           ),
           purchase_order_items (
             description,
@@ -600,30 +610,89 @@ export const PurchaseOrderManager = () => {
     }
   };
 
-  const downloadPurchaseOrder = (po: PurchaseOrder) => {
-    const items = poItems.map(item => 
-      `${item.description},${item.quantity},${item.unit_price},${item.gst_rate}%,${formatIndianCurrency(item.line_total)}`
-    ).join('\n');
-    
-    const csvContent = `Purchase Order: ${po.po_number}
-Date: ${po.order_date}
-Supplier: ${po.suppliers?.company_name || 'N/A'}
-Expected Delivery: ${po.expected_delivery_date || 'N/A'}
+  const downloadPurchaseOrder = async (po: PurchaseOrder) => {
+    try {
+      // Fetch PO items for this specific PO
+      const { data, error } = await supabase
+        .from('purchase_order_items')
+        .select('*')
+        .eq('purchase_order_id', po.id);
 
-Description,Quantity,Unit Price,GST Rate,Line Total
-${items}
+      if (error) throw error;
+      const items = data || [];
 
-Subtotal: ${formatIndianCurrency(po.subtotal)}
-Tax: ${formatIndianCurrency(po.tax_amount)}
-Total: ${formatIndianCurrency(po.total_amount)}`;
+      // Fetch full supplier details if not available
+      let supplierDetails = po.suppliers;
+      if (po.supplier_id && (!supplierDetails || !supplierDetails.address)) {
+        const { data: supplierData, error: supplierError } = await supabase
+          .from('suppliers')
+          .select('company_name, address, phone, email, gstin')
+          .eq('id', po.supplier_id)
+          .single();
 
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `purchase-order-${po.po_number}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
+        if (!supplierError && supplierData) {
+          supplierDetails = supplierData;
+        }
+      }
+      
+      // Fetch company info from profile
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('business_entities')
+        .eq('id', (await supabase.auth.getUser()).data.user?.id)
+        .single();
+
+      const companyInfo = profileData?.business_entities?.[0] || {
+        company_name: "Your Company Name",
+        address: "Your Company Address",
+        owner_phone: "Your Phone",
+        gst: "Your GSTIN"
+      };
+      
+      // Generate and download PDF
+      const pdfDoc = (
+        <POPDF 
+          purchaseOrder={{
+            ...po,
+            suppliers: supplierDetails
+          }}
+          items={items.map(item => ({
+            description: item.description,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            gst_rate: item.gst_rate,
+            line_total: item.line_total
+          }))}
+          companyInfo={{
+            name: companyInfo.company_name || "Your Company Name",
+            address: companyInfo.address || "Your Company Address",
+            phone: companyInfo.owner_phone || "Your Phone",
+            email: (await supabase.auth.getUser()).data.user?.email || "your@email.com",
+            gstin: companyInfo.gst || "Your GSTIN"
+          }}
+        />
+      );
+      
+      const blob = await pdf(pdfDoc).toBlob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `purchase-order-${po.po_number}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+
+      toast({
+        title: "Success",
+        description: "Purchase order downloaded as PDF"
+      });
+    } catch (error) {
+      console.error('Error downloading purchase order:', error);
+      toast({
+        title: "Error",
+        description: "Failed to download purchase order",
+        variant: "destructive"
+      });
+    }
   };
 
   const openReceivingModal = (po: PurchaseOrder) => {
