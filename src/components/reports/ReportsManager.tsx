@@ -104,20 +104,15 @@ export const ReportsManager: React.FC = () => {
   const { toast } = useToast();
 
 
-  // Refresh reports when selectedCompany changes to ensure latest data
+  // Generate report when dependencies change
   useEffect(() => {
-    if (selectedCompany && selectedReport && dateFrom && dateTo) {
-      // Small delay to ensure state is updated
+    // Only generate if all required data is available
+    if (selectedReport && selectedCompany && dateFrom && dateTo) {
+      // Use a small delay to debounce rapid changes and prevent race conditions
       const timeoutId = setTimeout(() => {
         generateReport();
-      }, 100);
+      }, 150);
       return () => clearTimeout(timeoutId);
-    }
-  }, [selectedCompany]);
-
-  useEffect(() => {
-    if (selectedReport && selectedCompany) {
-      generateReport();
     } else if (!selectedCompany) {
       // Clear report data if no company is selected
       setReportData([]);
@@ -143,6 +138,7 @@ export const ReportsManager: React.FC = () => {
       return;
     }
 
+    // Don't clear existing data immediately - keep it visible while loading
     setLoading(true);
     try {
       console.log('=== Generating Report ===');
@@ -1219,109 +1215,150 @@ export const ReportsManager: React.FC = () => {
 
         case 'return-void-report': {
           // Fetch all return/refund invoices (treated as void but kept for record-keeping)
-          const { data: saleReturns, error: saleReturnsError } = await supabase
-            .from('invoices')
-            .select(`
-              id,
-              invoice_number,
-              invoice_date,
-              total_amount,
-              subtotal,
-              tax_amount,
-              payment_status,
-              notes,
-              business_entities(name),
-              suppliers(company_name),
-              customers(company_name)
-            `)
-            .eq('company_id', selectedCompany.company_name)
-            .eq('invoice_type', 'sale_return')
-            .gte('invoice_date', dateFrom)
-            .lte('invoice_date', dateTo)
-            .order('invoice_date', { ascending: false });
+          try {
+            const { data: saleReturns, error: saleReturnsError } = await supabase
+              .from('invoices')
+              .select(`
+                id,
+                invoice_number,
+                invoice_date,
+                total_amount,
+                subtotal,
+                tax_amount,
+                payment_status,
+                notes,
+                entity_type,
+                business_entities(name, entity_type),
+                suppliers(company_name)
+              `)
+              .eq('company_id', selectedCompany.company_name)
+              .eq('invoice_type', 'sale_return')
+              .gte('invoice_date', dateFrom)
+              .lte('invoice_date', dateTo)
+              .order('invoice_date', { ascending: false });
 
-          const { data: purchaseReturns, error: purchaseReturnsError } = await supabase
-            .from('invoices')
-            .select(`
-              id,
-              invoice_number,
-              invoice_date,
-              total_amount,
-              subtotal,
-              tax_amount,
-              payment_status,
-              notes,
-              business_entities(name),
-              suppliers(company_name),
-              customers(company_name)
-            `)
-            .eq('company_id', selectedCompany.company_name)
-            .eq('invoice_type', 'purchase_return')
-            .gte('invoice_date', dateFrom)
-            .lte('invoice_date', dateTo)
-            .order('invoice_date', { ascending: false });
+            if (saleReturnsError) {
+              console.error('Error fetching sale returns:', saleReturnsError);
+              throw saleReturnsError;
+            }
 
-          if (saleReturnsError) {
-            console.error('Error fetching sale returns:', saleReturnsError);
+            const { data: purchaseReturns, error: purchaseReturnsError } = await supabase
+              .from('invoices')
+              .select(`
+                id,
+                invoice_number,
+                invoice_date,
+                total_amount,
+                subtotal,
+                tax_amount,
+                payment_status,
+                notes,
+                entity_type,
+                business_entities(name, entity_type),
+                suppliers(company_name)
+              `)
+              .eq('company_id', selectedCompany.company_name)
+              .eq('invoice_type', 'purchase_return')
+              .gte('invoice_date', dateFrom)
+              .lte('invoice_date', dateTo)
+              .order('invoice_date', { ascending: false });
+
+            if (purchaseReturnsError) {
+              console.error('Error fetching purchase returns:', purchaseReturnsError);
+              throw purchaseReturnsError;
+            }
+
+            // Map sale returns - customers are in business_entities with entity_type='customer'
+            const saleReturnRows = (saleReturns || []).map(inv => {
+              // Determine customer name from business_entities (for customers) or suppliers
+              let customerName = 'Miscellaneous';
+              if (inv.business_entities) {
+                // Check if it's a customer entity
+                if (inv.business_entities.entity_type === 'customer' || inv.entity_type === 'customer') {
+                  customerName = inv.business_entities.name || 'Miscellaneous';
+                } else {
+                  customerName = inv.business_entities.name || 'Miscellaneous';
+                }
+              } else if (inv.suppliers) {
+                customerName = inv.suppliers.company_name || 'Miscellaneous';
+              }
+
+              return {
+                subcategory: inv.invoice_number || '',
+                amount: inv.total_amount || 0,
+                category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
+                invoice_number: inv.invoice_number,
+                invoice_date: inv.invoice_date,
+                customer: customerName,
+                subtotal: inv.subtotal || 0,
+                tax_amount: inv.tax_amount || 0,
+                payment_status: inv.payment_status || 'due',
+                record_type: 'Sale Return',
+                notes: inv.notes || ''
+              };
+            });
+
+            // Map purchase returns - suppliers can be in suppliers table or business_entities
+            const purchaseReturnRows = (purchaseReturns || []).map(inv => {
+              // Determine supplier name from suppliers table or business_entities
+              let supplierName = 'Miscellaneous';
+              if (inv.suppliers) {
+                supplierName = inv.suppliers.company_name || 'Miscellaneous';
+              } else if (inv.business_entities) {
+                // Check if it's a supplier entity
+                if (inv.business_entities.entity_type === 'supplier' || inv.entity_type === 'supplier') {
+                  supplierName = inv.business_entities.name || 'Miscellaneous';
+                } else {
+                  supplierName = inv.business_entities.name || 'Miscellaneous';
+                }
+              }
+
+              return {
+                subcategory: inv.invoice_number || '',
+                amount: inv.total_amount || 0,
+                category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
+                invoice_number: inv.invoice_number,
+                invoice_date: inv.invoice_date,
+                supplier: supplierName,
+                subtotal: inv.subtotal || 0,
+                tax_amount: inv.tax_amount || 0,
+                payment_status: inv.payment_status || 'due',
+                record_type: 'Purchase Return',
+                notes: inv.notes || ''
+              };
+            });
+
+            sampleData = [...saleReturnRows, ...purchaseReturnRows];
+
+            // Calculate totals for summary
+            const totalSaleReturns = saleReturnRows.reduce((sum, inv) => sum + (inv.amount || 0), 0);
+            const totalPurchaseReturns = purchaseReturnRows.reduce((sum, inv) => sum + (inv.amount || 0), 0);
+            const totalReturnAmount = totalSaleReturns + totalPurchaseReturns;
+
+            newSummary = {
+              totalSales: totalSaleReturns,
+              totalPurchases: totalPurchaseReturns,
+              grossProfit: 0, // Returns are void, no profit impact
+              netProfit: totalReturnAmount
+            };
+
+            console.log(`Return report: Found ${saleReturnRows.length} sale returns and ${purchaseReturnRows.length} purchase returns`);
+          } catch (error: any) {
+            console.error('Error in return-void-report:', error);
             toast({
               title: "Error",
-              description: "Failed to fetch sale return invoices",
+              description: error.message || "Failed to fetch return invoices. Please try again.",
               variant: "destructive"
             });
+            // Don't throw - allow empty data to be set
+            sampleData = [];
+            newSummary = {
+              totalSales: 0,
+              totalPurchases: 0,
+              grossProfit: 0,
+              netProfit: 0
+            };
           }
-
-          if (purchaseReturnsError) {
-            console.error('Error fetching purchase returns:', purchaseReturnsError);
-            toast({
-              title: "Error",
-              description: "Failed to fetch purchase return invoices",
-              variant: "destructive"
-            });
-          }
-
-          // Map sale returns
-          const saleReturnRows = (saleReturns || []).map(inv => ({
-            subcategory: inv.invoice_number || '',
-            amount: inv.total_amount || 0,
-            category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
-            invoice_number: inv.invoice_number,
-            invoice_date: inv.invoice_date,
-            customer: inv.customers?.company_name || inv.business_entities?.name || 'Miscellaneous',
-            subtotal: inv.subtotal || 0,
-            tax_amount: inv.tax_amount || 0,
-            payment_status: inv.payment_status || 'due',
-            record_type: 'Sale Return (Void)',
-            notes: inv.notes || ''
-          }));
-
-          // Map purchase returns
-          const purchaseReturnRows = (purchaseReturns || []).map(inv => ({
-            subcategory: inv.invoice_number || '',
-            amount: inv.total_amount || 0,
-            category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
-            invoice_number: inv.invoice_number,
-            invoice_date: inv.invoice_date,
-            supplier: inv.suppliers?.company_name || inv.business_entities?.name || 'Miscellaneous',
-            subtotal: inv.subtotal || 0,
-            tax_amount: inv.tax_amount || 0,
-            payment_status: inv.payment_status || 'due',
-            record_type: 'Purchase Return (Void)',
-            notes: inv.notes || ''
-          }));
-
-          sampleData = [...saleReturnRows, ...purchaseReturnRows];
-
-          // Calculate totals for summary
-          const totalSaleReturns = saleReturnRows.reduce((sum, inv) => sum + (inv.amount || 0), 0);
-          const totalPurchaseReturns = purchaseReturnRows.reduce((sum, inv) => sum + (inv.amount || 0), 0);
-          const totalReturnAmount = totalSaleReturns + totalPurchaseReturns;
-
-          newSummary = {
-            totalSales: totalSaleReturns,
-            totalPurchases: totalPurchaseReturns,
-            grossProfit: 0, // Returns are void, no profit impact
-            netProfit: totalReturnAmount
-          };
           break;
         }
         
@@ -1331,7 +1368,7 @@ export const ReportsManager: React.FC = () => {
         }
       }
 
-      // Ensure data is set even if empty
+      // Set data atomically - update all state together to prevent flashing
       setReportData(sampleData || []);
       setSummary(newSummary);
       setGeneratedTime(new Date().toLocaleString('en-IN', {
@@ -1344,6 +1381,9 @@ export const ReportsManager: React.FC = () => {
         hour12: true
       }));
       
+      // Only then clear loading state to show the data
+      setLoading(false);
+      
       const itemCount = sampleData.length;
       console.log(`Report generated successfully. Found ${itemCount} items for company ${selectedCompany.company_name} in date range ${dateFrom} to ${dateTo}`);
       
@@ -1353,21 +1393,22 @@ export const ReportsManager: React.FC = () => {
           description: `No data found for ${REPORT_TYPES.find(r => r.id === selectedReport)?.name || selectedReport} in the selected date range.`,
           variant: "default"
         });
+      } else if (itemCount > 0) {
+        toast({
+          title: "Success",
+          description: `Report generated for ${selectedCompany.company_name} - ${itemCount} ${itemCount === 1 ? 'item' : 'items'} found`,
+          duration: 3000
+        });
       }
       
-      toast({
-        title: "Success",
-        description: `Report generated for ${selectedCompany.company_name} - ${itemCount} ${itemCount === 1 ? 'item' : 'items'} found`,
-        duration: 3000
-      });
-      
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Error generating report:', error);
       toast({
         title: "Error",
-        description: "Failed to generate report",
+        description: error.message || "Failed to generate report. Please try again.",
         variant: "destructive"
       });
-    } finally {
+      // Don't clear existing data on error - keep what was there before
       setLoading(false);
     }
   };
@@ -1946,7 +1987,7 @@ export const ReportsManager: React.FC = () => {
                         <>
                           <TableCell>
                             <Badge variant="destructive" className="text-xs">
-                              {(row as any).record_type || 'Void'}
+                              {(row as any).record_type || 'Return'}
                             </Badge>
                           </TableCell>
                           <TableCell className="font-medium">{row.invoice_number || row.subcategory}</TableCell>
@@ -1954,10 +1995,12 @@ export const ReportsManager: React.FC = () => {
                           <TableCell>{row.customer || row.supplier || 'N/A'}</TableCell>
                           <TableCell className="text-right">{formatIndianCurrency(row.subtotal || 0)}</TableCell>
                           <TableCell className="text-right">{formatIndianCurrency(row.tax_amount || 0)}</TableCell>
-                          <TableCell className="text-right text-red-500">{formatIndianCurrency(row.amount || 0)}</TableCell>
+                          <TableCell className="text-right text-red-500 font-semibold">
+                            {formatIndianCurrency(row.amount || 0)}
+                          </TableCell>
                           <TableCell>
                             <Badge variant="outline" className="text-destructive">
-                              {(row as any).record_type?.includes('Void') ? 'Void' : row.payment_status || 'due'}
+                              {row.payment_status || 'due'}
                             </Badge>
                           </TableCell>
                           <TableCell className="max-w-xs truncate" title={(row as any).notes || ''}>
