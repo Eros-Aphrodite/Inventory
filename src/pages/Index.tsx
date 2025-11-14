@@ -582,7 +582,7 @@ const Index = () => {
               <Label htmlFor="website">Website</Label>
               <Input
                 id="website"
-                type="url"
+                type="text"
                 value={companyFormData.website}
                 onChange={(e) => setCompanyFormData(prev => ({ ...prev, website: e.target.value }))}
                 placeholder="https://example.com"

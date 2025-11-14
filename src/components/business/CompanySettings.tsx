@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -34,6 +34,7 @@ export const CompanySettings = () => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const isSavingRef = useRef(false);
   const [companyDetails, setCompanyDetails] = useState<CompanyDetails>({
     name: "",
     address: "",
@@ -52,33 +53,7 @@ export const CompanySettings = () => {
     currency: "INR"
   });
 
-  useEffect(() => {
-    if (user && selectedCompany) {
-      fetchCompanyDetails();
-    } else if (!selectedCompany) {
-      // Reset form if no company selected
-      setCompanyDetails({
-        name: "",
-        address: "",
-        phone: "",
-        email: user?.email || "",
-        gstin: "",
-        website: "",
-        owner_name: "",
-        owner_phone: "",
-        city: "",
-        state: "",
-        postalcode: "",
-        country: "India",
-        gst: "",
-        year_start: new Date().getFullYear(),
-        currency: "INR"
-      });
-      setLoading(false);
-    }
-  }, [user, selectedCompany]);
-
-  const fetchCompanyDetails = async () => {
+  const fetchCompanyDetails = useCallback(async () => {
     if (!selectedCompany || !user) return;
 
     try {
@@ -101,7 +76,7 @@ export const CompanySettings = () => {
           setCompanyDetails({
             name: businessEntity?.company_name || "",
             address: businessEntity?.address || "",
-            phone: businessEntity?.owner_phone || businessEntity?.phone || "",
+            phone: businessEntity?.phone || businessEntity?.owner_phone || "",
             email: businessEntity?.email || user?.email || "",
             gstin: businessEntity?.gst || businessEntity?.gstin || "",
             website: businessEntity?.website || "",
@@ -120,7 +95,7 @@ export const CompanySettings = () => {
           setCompanyDetails({
             name: selectedCompany.company_name || "",
             address: selectedCompany.address || "",
-            phone: selectedCompany.owner_phone || selectedCompany.phone || "",
+            phone: selectedCompany.phone || selectedCompany.owner_phone || "",
             email: selectedCompany.email || user?.email || "",
             gstin: selectedCompany.gst || selectedCompany.gstin || "",
             website: selectedCompany.website || "",
@@ -146,7 +121,38 @@ export const CompanySettings = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user, selectedCompany?.company_name, toast]);
+
+  useEffect(() => {
+    // Skip fetch if we're currently saving to prevent loop
+    if (isSavingRef.current) {
+      return;
+    }
+
+    if (user && selectedCompany) {
+      fetchCompanyDetails();
+    } else if (!selectedCompany) {
+      // Reset form if no company selected
+      setCompanyDetails({
+        name: "",
+        address: "",
+        phone: "",
+        email: user?.email || "",
+        gstin: "",
+        website: "",
+        owner_name: "",
+        owner_phone: "",
+        city: "",
+        state: "",
+        postalcode: "",
+        country: "India",
+        gst: "",
+        year_start: new Date().getFullYear(),
+        currency: "INR"
+      });
+      setLoading(false);
+    }
+  }, [user?.id, selectedCompany?.company_name, fetchCompanyDetails]);
 
   const handleSave = async () => {
     if (!user || !selectedCompany) {
@@ -159,6 +165,7 @@ export const CompanySettings = () => {
     }
 
     setSaving(true);
+    isSavingRef.current = true;
     try {
       // Get existing business_entities
       const { data: profileData, error: fetchError } = await supabase
@@ -232,8 +239,24 @@ export const CompanySettings = () => {
         description: "Company details updated successfully"
       });
 
-      // Refresh the company details to ensure UI is in sync
-      await fetchCompanyDetails();
+      // Update local state directly instead of re-fetching to prevent loop
+      setCompanyDetails({
+        name: updatedBusinessEntity.company_name,
+        address: updatedBusinessEntity.address || "",
+        phone: updatedBusinessEntity.phone || "",
+        email: updatedBusinessEntity.email || user?.email || "",
+        gstin: updatedBusinessEntity.gst || "",
+        website: updatedBusinessEntity.website || "",
+        owner_name: updatedBusinessEntity.owner_name || "",
+        owner_phone: updatedBusinessEntity.owner_phone || "",
+        city: updatedBusinessEntity.city || "",
+        state: updatedBusinessEntity.state || "",
+        postalcode: updatedBusinessEntity.postalcode || "",
+        country: updatedBusinessEntity.country || "India",
+        gst: updatedBusinessEntity.gst || "",
+        year_start: updatedBusinessEntity.year_start || new Date().getFullYear(),
+        currency: updatedBusinessEntity.currency || "INR"
+      });
     } catch (error) {
       console.error('Save error:', error);
       toast({
@@ -243,6 +266,10 @@ export const CompanySettings = () => {
       });
     } finally {
       setSaving(false);
+      // Reset the saving flag after a short delay to allow state updates to complete
+      setTimeout(() => {
+        isSavingRef.current = false;
+      }, 100);
     }
   };
 
@@ -332,8 +359,8 @@ export const CompanySettings = () => {
               <Label htmlFor="phone">Phone</Label>
               <Input
                 id="phone"
-                value={companyDetails.owner_phone}
-                onChange={(e) => handleInputChange('owner_phone', e.target.value)}
+                value={companyDetails.phone}
+                onChange={(e) => handleInputChange('phone', e.target.value)}
                 placeholder="Enter phone number"
               />
             </div>

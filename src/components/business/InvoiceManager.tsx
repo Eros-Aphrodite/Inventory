@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -192,6 +192,23 @@ export const InvoiceManager = () => {
   });
   const { toast } = useToast();
 
+  // Define fetchInvoicePayments early so it can be used in useEffect
+  const fetchInvoicePayments = useCallback(async (invoiceId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('invoice_payments')
+        .select('*')
+        .eq('invoice_id', invoiceId)
+        .order('payment_date', { ascending: false });
+
+      if (error) throw error;
+      setInvoicePayments(data || []);
+    } catch (error) {
+      console.error('Failed to load payments:', error);
+      setInvoicePayments([]);
+    }
+  }, []);
+
   useEffect(() => {
     fetchInvoices();
     fetchBusinessEntities();
@@ -200,6 +217,16 @@ export const InvoiceManager = () => {
       fetchPurchaseOrders(formData.invoice_type);
     }
   }, [selectedCompany, formData.invoice_type]);
+
+  // Fetch invoice payments when view dialog opens
+  useEffect(() => {
+    if (viewOpen && selectedInvoice) {
+      fetchInvoicePayments(selectedInvoice.id);
+    } else {
+      // Clear payments when dialog closes
+      setInvoicePayments([]);
+    }
+  }, [viewOpen, selectedInvoice?.id, fetchInvoicePayments]);
 
   const fetchInvoices = async () => {
     try {
@@ -986,6 +1013,7 @@ export const InvoiceManager = () => {
       const companyInfo = profileData?.business_entities?.[0] || {
         company_name: "Your Company Name",
         address: "Your Company Address",
+        phone: "Your Phone",
         owner_phone: "Your Phone",
         gst: "Your GSTIN"
       };
@@ -998,7 +1026,7 @@ export const InvoiceManager = () => {
           companyInfo={{
             name: companyInfo.company_name || "Your Company Name",
             address: companyInfo.address || "Your Company Address",
-            phone: companyInfo.owner_phone || "Your Phone",
+            phone: companyInfo.phone || companyInfo.owner_phone || "Your Phone",
             email: (await supabase.auth.getUser()).data.user?.email || "your@email.com",
             gstin: companyInfo.gst || "Your GSTIN"
           }}
@@ -1033,22 +1061,6 @@ export const InvoiceManager = () => {
       payment_method: 'cash',
       notes: ''
     });
-  };
-
-  const fetchInvoicePayments = async (invoiceId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('invoice_payments')
-        .select('*')
-        .eq('invoice_id', invoiceId)
-        .order('payment_date', { ascending: false });
-
-      if (error) throw error;
-      setInvoicePayments(data || []);
-    } catch (error) {
-      console.error('Failed to load payments:', error);
-      setInvoicePayments([]);
-    }
   };
 
   const recordPayment = async () => {
