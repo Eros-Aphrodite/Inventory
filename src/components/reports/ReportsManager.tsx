@@ -61,6 +61,8 @@ interface ReportSummary {
   totalPurchases: number;
   grossProfit: number;
   netProfit: number;
+  purchaseReturns?: number;
+  netPurchase?: number;
 }
 
 const REPORT_TYPES = [
@@ -488,7 +490,7 @@ export const ReportsManager: React.FC = () => {
             console.error('Error fetching purchase orders:', poError);
           }
 
-          // Fetch purchase invoices (including miscellaneous invoices with entity_type='other')
+          // Fetch purchase invoices
           const { data: purchaseInvoices, error: invoiceError } = await supabase
             .from('invoices')
             .select(`
@@ -504,7 +506,7 @@ export const ReportsManager: React.FC = () => {
               business_entities(name)
             `)
             .eq('company_id', selectedCompany.company_name)
-            .eq('invoice_type', 'purchase') // Exclude purchase_return (treated as void)
+            .eq('invoice_type', 'purchase')
             .gte('invoice_date', dateFrom)
             .lte('invoice_date', dateTo)
             .order('invoice_date', { ascending: false });
@@ -516,6 +518,31 @@ export const ReportsManager: React.FC = () => {
               description: "Failed to fetch purchase invoices: " + invoiceError.message,
               variant: "destructive"
             });
+          }
+
+          // Fetch purchase return invoices
+          const { data: purchaseReturns, error: returnError } = await supabase
+            .from('invoices')
+            .select(`
+              invoice_number,
+              invoice_date,
+              subtotal,
+              tax_amount,
+              total_amount,
+              invoice_type,
+              entity_type,
+              payment_status,
+              suppliers(company_name),
+              business_entities(name)
+            `)
+            .eq('company_id', selectedCompany.company_name)
+            .eq('invoice_type', 'purchase_return')
+            .gte('invoice_date', dateFrom)
+            .lte('invoice_date', dateTo)
+            .order('invoice_date', { ascending: false });
+
+          if (returnError) {
+            console.error('Error fetching purchase returns:', returnError);
           }
 
           // Map purchase orders
@@ -544,11 +571,8 @@ export const ReportsManager: React.FC = () => {
             };
           });
 
-          // Map purchase invoices (exclude returns/refunds - treated as void)
-          const regularPurchases = (purchaseInvoices || []).filter(inv => inv.invoice_type === 'purchase');
-          // Note: purchaseReturns are excluded from calculations (treated as void)
-
-          const purchaseInvoiceRows = regularPurchases.map(inv => ({
+          // Map purchase invoices
+          const purchaseInvoiceRows = (purchaseInvoices || []).map(inv => ({
             subcategory: inv.invoice_number || '',
             amount: inv.total_amount || 0,
             category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
@@ -561,23 +585,51 @@ export const ReportsManager: React.FC = () => {
             record_type: 'Purchase Invoice'
           }));
 
-          // Return/refund invoices are excluded from sampleData and calculations (treated as void)
-          sampleData = [...poRows, ...purchaseInvoiceRows];
+          // Map purchase return invoices
+          const purchaseReturnRows = (purchaseReturns || []).map(inv => ({
+            subcategory: inv.invoice_number || '',
+            amount: inv.total_amount || 0,
+            category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
+            invoice_number: inv.invoice_number,
+            invoice_date: inv.invoice_date,
+            supplier: inv.suppliers?.company_name || inv.business_entities?.name || 'Miscellaneous',
+            subtotal: inv.subtotal || 0,
+            tax_amount: inv.tax_amount || 0,
+            payment_status: inv.payment_status || 'due',
+            record_type: 'Purchase Return'
+          }));
 
-          // Calculate totals (returns/refunds excluded - treated as void)
+          // Include all: POs, purchases, and returns
+          sampleData = [...poRows, ...purchaseInvoiceRows, ...purchaseReturnRows];
+
+          // Calculate totals
           const totalPO = (purchaseOrders || []).reduce((sum, po) => sum + (po.subtotal || 0), 0);
-          const totalPurchases = regularPurchases.reduce((sum, inv) => sum + (inv.subtotal || 0), 0);
+          const totalPurchases = (purchaseInvoices || []).reduce((sum, inv) => sum + (inv.subtotal || 0), 0);
+          const totalPurchaseReturns = (purchaseReturns || []).reduce((sum, inv) => sum + (inv.subtotal || 0), 0);
+          
           const totalTax = (purchaseOrders || []).reduce((sum, po) => sum + (po.tax_amount || 0), 0) +
-                          regularPurchases.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0);
+                          (purchaseInvoices || []).reduce((sum, inv) => sum + (inv.tax_amount || 0), 0);
+          const totalReturnTax = (purchaseReturns || []).reduce((sum, inv) => sum + (inv.tax_amount || 0), 0);
+          
           const totalAmount = (purchaseOrders || []).reduce((sum, po) => sum + (po.total_amount || 0), 0) +
-                             regularPurchases.reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
+                             (purchaseInvoices || []).reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
+          const totalReturnAmount = (purchaseReturns || []).reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
+
+          // Net Purchase = Purchase - Purchase Return
+          const netPurchase = (totalPO + totalPurchases) - totalPurchaseReturns;
+          const netTax = totalTax - totalReturnTax;
+          const netAmount = totalAmount - totalReturnAmount;
 
           newSummary = {
             totalSales: 0,
             totalPurchases: totalPO + totalPurchases,
             grossProfit: totalTax,
-            netProfit: totalAmount
+            netProfit: netAmount,
+            purchaseReturns: totalPurchaseReturns,
+            netPurchase: netPurchase
           };
+          
+          console.log(`Purchase report: Purchases=${totalPO + totalPurchases}, Returns=${totalPurchaseReturns}, Net=${netPurchase}`);
           break;
         }
 
@@ -1805,13 +1857,13 @@ export const ReportsManager: React.FC = () => {
                     )}
                     {selectedReport === 'purchase-report' && (
                       <>
-                        <TableHead>PO #</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>PO/Invoice #</TableHead>
                         <TableHead>Date</TableHead>
                         <TableHead>Supplier</TableHead>
                         <TableHead className="text-right">Subtotal</TableHead>
                         <TableHead className="text-right">Tax</TableHead>
                         <TableHead className="text-right">Total</TableHead>
-                        <TableHead className="text-right">Paid</TableHead>
                         <TableHead>Status</TableHead>
                       </>
                     )}
@@ -1923,16 +1975,23 @@ export const ReportsManager: React.FC = () => {
                       )}
                       {selectedReport === 'purchase-report' && (
                         <>
-                          <TableCell className="font-medium">{row.po_number || row.subcategory}</TableCell>
+                          <TableCell>
+                            <Badge variant={
+                              row.record_type === 'Purchase Return' ? 'destructive' :
+                              row.record_type === 'PO' ? 'secondary' : 'default'
+                            }>
+                              {row.record_type || 'Purchase'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="font-medium">{row.po_number || row.invoice_number || row.subcategory}</TableCell>
                           <TableCell>{row.invoice_date ? formatDate(row.invoice_date) : row.category}</TableCell>
                           <TableCell>{row.supplier || 'N/A'}</TableCell>
                           <TableCell className="text-right">{formatIndianCurrency(row.subtotal || 0)}</TableCell>
                           <TableCell className="text-right">{formatIndianCurrency(row.tax_amount || 0)}</TableCell>
                           <TableCell className="text-right">{formatIndianCurrency(row.amount)}</TableCell>
-                          <TableCell className="text-right">{formatIndianCurrency(0)}</TableCell>
                           <TableCell>
-                            <Badge variant={row.status === 'received' ? 'default' : 'outline'}>
-                              {row.status || 'draft'}
+                            <Badge variant={row.payment_status === 'paid' ? 'default' : 'outline'}>
+                              {row.payment_status || row.status || 'due'}
                             </Badge>
                           </TableCell>
                         </>
@@ -2177,26 +2236,26 @@ export const ReportsManager: React.FC = () => {
                   <>
                     <div className="text-center">
                       <p className="text-sm text-muted-foreground">Total Purchases</p>
-                      <p className="text-lg font-semibold text-red-500">
+                      <p className="text-lg font-semibold text-blue-500">
                         {formatIndianCurrency(summary.totalPurchases)}
+                      </p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm text-muted-foreground">Purchase Returns</p>
+                      <p className="text-lg font-semibold text-red-500">
+                        {formatIndianCurrency(summary.purchaseReturns || 0)}
+                      </p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm text-muted-foreground">Net Purchase</p>
+                      <p className="text-lg font-semibold text-green-500">
+                        {formatIndianCurrency(summary.netPurchase || summary.totalPurchases)}
                       </p>
                     </div>
                     <div className="text-center">
                       <p className="text-sm text-muted-foreground">Total Tax</p>
                       <p className="text-lg font-semibold text-blue-500">
                         {formatIndianCurrency(summary.grossProfit)}
-                      </p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-sm text-muted-foreground">Total Paid</p>
-                      <p className="text-lg font-semibold text-green-500">
-                        {formatIndianCurrency(2000)}
-                      </p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-sm text-muted-foreground">Outstanding</p>
-                      <p className="text-lg font-semibold text-red-500">
-                        {formatIndianCurrency(summary.netProfit)}
                       </p>
                     </div>
                   </>
