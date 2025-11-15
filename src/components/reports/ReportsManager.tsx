@@ -536,7 +536,7 @@ export const ReportsManager: React.FC = () => {
           newSummary = {
             totalSales,
             totalPurchases: 0,
-            grossProfit: totalTax,
+            grossProfit: netTax, // Use net tax (tax - return tax)
             netProfit: netAmount,
             saleReturns: totalSaleReturns,
             netSales: netSales
@@ -1140,12 +1140,22 @@ export const ReportsManager: React.FC = () => {
             ledgerEntries = entriesData || [];
           }
 
-          // Fetch purchase invoices and returns
+          // Fetch sales invoices
+          const { data: salesInvoices } = await supabase
+            .from('invoices')
+            .select('invoice_number, invoice_date, total_amount, invoice_type, payment_status, business_entities(name), suppliers(company_name)')
+            .eq('company_id', selectedCompany.company_name)
+            .eq('invoice_type', 'sales')
+            .gte('invoice_date', dateFrom)
+            .lte('invoice_date', dateTo)
+            .order('invoice_date', { ascending: false });
+
+          // Fetch purchase invoices
           const { data: purchaseInvoices } = await supabase
             .from('invoices')
             .select('invoice_number, invoice_date, total_amount, invoice_type, payment_status, suppliers(company_name), business_entities(name)')
             .eq('company_id', selectedCompany.company_name)
-            .eq('invoice_type', 'purchase') // Exclude purchase_return (treated as void)
+            .eq('invoice_type', 'purchase')
             .gte('invoice_date', dateFrom)
             .lte('invoice_date', dateTo)
             .order('invoice_date', { ascending: false });
@@ -1182,10 +1192,20 @@ export const ReportsManager: React.FC = () => {
               };
             });
 
-          // Map purchase invoices (returns/refunds excluded - treated as void)
-          const regularPurchases = purchaseInvoices || [];
+          // Map sales invoices
+          const salesInvoiceRows = (salesInvoices || []).map(inv => ({
+            subcategory: inv.invoice_number || '',
+            amount: inv.total_amount || 0,
+            category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
+            invoice_number: inv.invoice_number,
+            invoice_date: inv.invoice_date,
+            customer: inv.business_entities?.name || inv.suppliers?.company_name || 'N/A',
+            record_type: 'Sales Invoice',
+            payment_status: inv.payment_status || 'due'
+          }));
 
-          const purchaseInvoiceRows = regularPurchases.map(inv => ({
+          // Map purchase invoices
+          const purchaseInvoiceRows = (purchaseInvoices || []).map(inv => ({
             subcategory: inv.invoice_number || '',
             amount: inv.total_amount || 0,
             category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
@@ -1196,21 +1216,22 @@ export const ReportsManager: React.FC = () => {
             payment_status: inv.payment_status || 'due'
           }));
 
-          // Return/refund invoices are excluded (treated as void)
-          sampleData = [...payableEntries, ...receivableEntries, ...purchaseInvoiceRows];
+          // Combine all entries
+          sampleData = [...payableEntries, ...receivableEntries, ...salesInvoiceRows, ...purchaseInvoiceRows];
 
-          // Calculate totals (returns/refunds excluded - treated as void)
+          // Calculate totals
           const totalPayables = payableEntries.reduce((sum, e) => sum + (e.amount || 0), 0);
           const totalReceivables = receivableEntries.reduce((sum, e) => sum + (e.amount || 0), 0);
-          const totalPurchases = regularPurchases.reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
+          const totalSales = (salesInvoices || []).reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
+          const totalPurchases = (purchaseInvoices || []).reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
 
-            newSummary = {
-              totalSales: totalReceivables,
-              totalPurchases: totalPayables + totalPurchases,
-              grossProfit: sampleData.length,
-              netProfit: totalReceivables - totalPayables - totalPurchases
-            };
-            console.log(`Payment report: ${sampleData.length} entries found`);
+          newSummary = {
+            totalSales: totalReceivables + totalSales,
+            totalPurchases: totalPayables + totalPurchases,
+            grossProfit: sampleData.length,
+            netProfit: (totalReceivables + totalSales) - (totalPayables + totalPurchases)
+          };
+          console.log(`Payment report: ${sampleData.length} entries found`);
           } catch (error: any) {
             console.error('Payment report error:', error);
             toast({
