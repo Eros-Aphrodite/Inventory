@@ -63,6 +63,8 @@ interface ReportSummary {
   netProfit: number;
   purchaseReturns?: number;
   netPurchase?: number;
+  saleReturns?: number;
+  netSales?: number;
 }
 
 const REPORT_TYPES = [
@@ -171,6 +173,15 @@ export const ReportsManager: React.FC = () => {
             console.error('Error fetching sales invoices:', salesError);
           }
 
+          // Fetch sale return invoices
+          const { data: saleReturns } = await supabase
+            .from('invoices')
+            .select('subtotal, tax_amount, total_amount, invoice_date')
+            .eq('company_id', selectedCompany.company_name)
+            .eq('invoice_type', 'sale_return')
+            .gte('invoice_date', dateFrom)
+            .lte('invoice_date', dateTo);
+
           // Fetch purchase invoices
           const { data: purchaseInvoices, error: purchaseError } = await supabase
             .from('invoices')
@@ -183,6 +194,15 @@ export const ReportsManager: React.FC = () => {
           if (purchaseError) {
             console.error('Error fetching purchase invoices:', purchaseError);
           }
+
+          // Fetch purchase return invoices
+          const { data: purchaseReturns } = await supabase
+            .from('invoices')
+            .select('subtotal, tax_amount, total_amount, invoice_date')
+            .eq('company_id', selectedCompany.company_name)
+            .eq('invoice_type', 'purchase_return')
+            .gte('invoice_date', dateFrom)
+            .lte('invoice_date', dateTo);
 
           // Fetch labour invoices (as expenses)
           const { data: labourInvoices } = await supabase
@@ -201,9 +221,6 @@ export const ReportsManager: React.FC = () => {
             .eq('entity_type', 'transport')
             .gte('invoice_date', dateFrom)
             .lte('invoice_date', dateTo);
-
-          // Note: Return/refund invoices are treated as void and excluded from all calculations
-          // They are not fetched or included in any totals
 
           // Fetch sales invoice IDs first
           const salesInvoiceIds = (allSalesInvoices || []).map(inv => inv.id);
@@ -235,17 +252,26 @@ export const ReportsManager: React.FC = () => {
             return sum + (stock * purchasePrice);
           }, 0);
 
-          // Calculate total inventory cost including tax (opening stock + purchase tax)
-          // Return/refund invoices are excluded (treated as void)
+          // Calculate purchases and returns
           const totalPurchases = purchaseInvoices?.reduce((sum, inv) => sum + (inv.subtotal || 0), 0) || 0;
-          const purchaseTax = purchaseInvoices?.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0) || 0;
+          const totalPurchaseReturns = purchaseReturns?.reduce((sum, inv) => sum + (inv.subtotal || 0), 0) || 0;
+          const netPurchases = totalPurchases - totalPurchaseReturns;
           
-          // Total inventory cost including tax = Opening Stock + Purchase Tax
-          const totalInventoryCostWithTax = openingStockCost + purchaseTax;
+          const purchaseTax = purchaseInvoices?.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0) || 0;
+          const purchaseReturnTax = purchaseReturns?.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0) || 0;
+          const netPurchaseTax = purchaseTax - purchaseReturnTax;
+          
+          // Total inventory cost including tax = Opening Stock + Net Purchase Tax
+          const totalInventoryCostWithTax = openingStockCost + netPurchaseTax;
 
-          // Calculate total sales (all sales invoices, excluding returns/refunds which are void)
+          // Calculate sales and returns
           const totalSales = allSalesInvoices?.reduce((sum, inv) => sum + (inv.subtotal || 0), 0) || 0;
+          const totalSaleReturns = saleReturns?.reduce((sum, inv) => sum + (inv.subtotal || 0), 0) || 0;
+          const netSales = totalSales - totalSaleReturns;
+          
           const salesTax = allSalesInvoices?.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0) || 0;
+          const saleReturnTax = saleReturns?.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0) || 0;
+          const netSalesTax = salesTax - saleReturnTax;
           
           // Calculate total inventory selling price with tax
           const totalInventorySellingWithTax = (products || []).reduce((sum, product) => {
@@ -357,22 +383,26 @@ export const ReportsManager: React.FC = () => {
           const totalIndirectExpenses = indirectExpenses + indirectExpensesFromLedgers;
 
           // Calculate cost of goods sold properly
-          const effectiveCOGS = openingStockCost + totalPurchases - closingStock;
+          const effectiveCOGS = openingStockCost + netPurchases - closingStock;
           
-          // Calculate gross profit
-          const grossProfit = totalSales - effectiveCOGS;
+          // Calculate gross profit with net sales
+          const grossProfit = netSales - effectiveCOGS;
           
           // Calculate net profit (with indirect income and expenses)
           // Net Profit = Gross Profit - Indirect Expenses + Indirect Income - Tax Difference
-          const netProfit = grossProfit - totalIndirectExpenses + indirectIncome - (purchaseTax - salesTax);
+          const netProfit = grossProfit - totalIndirectExpenses + indirectIncome - (netPurchaseTax - netSalesTax);
 
-          console.log('Report totals - Sales:', totalSales, 'Purchases:', totalPurchases, 'Opening Stock:', openingStockCost, 'Closing Stock:', closingStock, 'COGS:', effectiveCOGS, 'Indirect Expenses (invoices):', indirectExpenses, 'Indirect Expenses (ledgers):', indirectExpensesFromLedgers, 'Total Indirect Expenses:', totalIndirectExpenses, 'Indirect Income:', indirectIncome, 'Net Profit:', netProfit);
+          console.log('P&L Report - Net Sales:', netSales, '(Sales:', totalSales, '- Returns:', totalSaleReturns, ') Net Purchases:', netPurchases, '(Purchases:', totalPurchases, '- Returns:', totalPurchaseReturns, ') Opening:', openingStockCost, 'Closing:', closingStock, 'COGS:', effectiveCOGS, 'Indirect Exp (invoices):', indirectExpenses, 'Indirect Exp (ledgers):', indirectExpensesFromLedgers, 'Total Indirect Exp:', totalIndirectExpenses, 'Indirect Income:', indirectIncome, 'Gross Profit:', grossProfit, 'Net Profit:', netProfit);
 
           sampleData = [
             { subcategory: 'Sales Account (All Sales Invoices)', amount: totalSales, category: 'Revenue' },
+            { subcategory: 'Less: Sale Returns', amount: -totalSaleReturns, category: 'Revenue' },
+            { subcategory: 'Net Sales', amount: netSales, category: 'Revenue' },
             { subcategory: 'Opening Stock', amount: openingStockCost, category: 'Cost of Goods Sold' },
             { subcategory: 'Purchase Account', amount: totalPurchases, category: 'Cost of Goods Sold' },
-            { subcategory: 'Total Inventory Cost (with Tax)', amount: totalInventoryCostWithTax, category: 'Cost of Goods Sold' },
+            { subcategory: 'Less: Purchase Returns', amount: -totalPurchaseReturns, category: 'Cost of Goods Sold' },
+            { subcategory: 'Net Purchases', amount: netPurchases, category: 'Cost of Goods Sold' },
+            { subcategory: 'Total Inventory Cost (with Net Tax)', amount: totalInventoryCostWithTax, category: 'Cost of Goods Sold' },
             { subcategory: 'Less: Closing Stock', amount: -closingStock, category: 'Cost of Goods Sold' },
             { subcategory: 'Cost of Goods Sold', amount: effectiveCOGS, category: 'Cost of Goods Sold' },
             { subcategory: '', amount: grossProfit, category: 'Gross Profit' },
@@ -381,22 +411,24 @@ export const ReportsManager: React.FC = () => {
             { subcategory: 'Indirect Expenses (Ledger)', amount: indirectExpensesFromLedgers, category: 'Indirect Expenses' },
             { subcategory: 'Total Indirect Expenses', amount: totalIndirectExpenses, category: 'Indirect Expenses' },
             { subcategory: 'Indirect Income (Ledger)', amount: indirectIncome, category: 'Indirect Income' },
-            { subcategory: 'Sales Tax Collected', amount: salesTax, category: 'Taxes' },
-            { subcategory: 'Purchase Tax Paid', amount: purchaseTax, category: 'Taxes' },
+            { subcategory: 'Net Sales Tax Collected', amount: netSalesTax, category: 'Taxes' },
+            { subcategory: 'Net Purchase Tax Paid', amount: netPurchaseTax, category: 'Taxes' },
             { subcategory: 'Total Inventory Selling Price (with Tax)', amount: totalInventorySellingWithTax, category: 'Net Profit' },
             { subcategory: '', amount: netProfit, category: 'Net Profit' }
           ];
           newSummary = {
-            totalSales,
-            totalPurchases,
+            totalSales: netSales,
+            totalPurchases: netPurchases,
             grossProfit,
-            netProfit
+            netProfit,
+            saleReturns: totalSaleReturns,
+            purchaseReturns: totalPurchaseReturns
           };
           break;
         }
         
         case 'sales-report': {
-          // Fetch all sales invoices (including miscellaneous invoices with entity_type='other')
+          // Fetch sales invoices
           const { data: salesData, error: salesDataError } = await supabase
             .from('invoices')
             .select(`
@@ -412,7 +444,7 @@ export const ReportsManager: React.FC = () => {
               suppliers(company_name)
             `)
             .eq('company_id', selectedCompany.company_name)
-            .eq('invoice_type', 'sales') // Exclude sale_return (treated as void)
+            .eq('invoice_type', 'sales')
             .gte('invoice_date', dateFrom)
             .lte('invoice_date', dateTo)
             .order('invoice_date', { ascending: false });
@@ -426,13 +458,35 @@ export const ReportsManager: React.FC = () => {
             });
           }
 
-          console.log('Sales report invoices found:', salesData?.length || 0);
+          // Fetch sale return invoices
+          const { data: saleReturns, error: returnError } = await supabase
+            .from('invoices')
+            .select(`
+              invoice_number,
+              invoice_date,
+              subtotal,
+              tax_amount,
+              total_amount,
+              payment_status,
+              invoice_type,
+              entity_type,
+              business_entities(name),
+              suppliers(company_name)
+            `)
+            .eq('company_id', selectedCompany.company_name)
+            .eq('invoice_type', 'sale_return')
+            .gte('invoice_date', dateFrom)
+            .lte('invoice_date', dateTo)
+            .order('invoice_date', { ascending: false });
 
-          // Returns/refunds are excluded from queries (treated as void)
-          const regularSales = salesData || [];
+          if (returnError) {
+            console.error('Error fetching sale returns:', returnError);
+          }
 
-          // Map regular sales only (returns excluded as void)
-          const salesRows = regularSales.map(inv => ({
+          console.log('Sales report invoices found:', salesData?.length || 0, 'Returns:', saleReturns?.length || 0);
+
+          // Map sales invoices
+          const salesRows = (salesData || []).map(inv => ({
             subcategory: inv.invoice_number || '',
             amount: inv.total_amount || 0,
             category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
@@ -442,22 +496,53 @@ export const ReportsManager: React.FC = () => {
             subtotal: inv.subtotal || 0,
             tax_amount: inv.tax_amount || 0,
             payment_status: inv.payment_status || 'due',
-            invoice_type: 'sales'
+            invoice_type: 'sales',
+            record_type: 'Sales Invoice'
           }));
 
-          sampleData = [...salesRows];
+          // Map sale return invoices
+          const saleReturnRows = (saleReturns || []).map(inv => ({
+            subcategory: inv.invoice_number || '',
+            amount: inv.total_amount || 0,
+            category: new Date(inv.invoice_date).toLocaleDateString('en-IN'),
+            invoice_number: inv.invoice_number,
+            invoice_date: inv.invoice_date,
+            customer: inv.business_entities?.name || inv.suppliers?.company_name || 'Miscellaneous',
+            subtotal: inv.subtotal || 0,
+            tax_amount: inv.tax_amount || 0,
+            payment_status: inv.payment_status || 'due',
+            invoice_type: 'sale_return',
+            record_type: 'Sale Return'
+          }));
 
-          // Calculate totals (only regular sales, returns excluded as void)
-          const totalSales = regularSales.reduce((sum, inv) => sum + (inv.subtotal || 0), 0);
-          const totalTax = regularSales.reduce((sum, inv) => sum + (inv.tax_amount || 0), 0);
-          const totalAmount = regularSales.reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
+          // Include both sales and returns
+          sampleData = [...salesRows, ...saleReturnRows];
+
+          // Calculate totals
+          const totalSales = (salesData || []).reduce((sum, inv) => sum + (inv.subtotal || 0), 0);
+          const totalSaleReturns = (saleReturns || []).reduce((sum, inv) => sum + (inv.subtotal || 0), 0);
+          
+          const totalTax = (salesData || []).reduce((sum, inv) => sum + (inv.tax_amount || 0), 0);
+          const totalReturnTax = (saleReturns || []).reduce((sum, inv) => sum + (inv.tax_amount || 0), 0);
+          
+          const totalAmount = (salesData || []).reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
+          const totalReturnAmount = (saleReturns || []).reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
+
+          // Net Sales = Sales - Sale Returns
+          const netSales = totalSales - totalSaleReturns;
+          const netTax = totalTax - totalReturnTax;
+          const netAmount = totalAmount - totalReturnAmount;
 
           newSummary = {
             totalSales,
             totalPurchases: 0,
             grossProfit: totalTax,
-            netProfit: totalAmount
+            netProfit: netAmount,
+            saleReturns: totalSaleReturns,
+            netSales: netSales
           };
+          
+          console.log(`Sales report: Sales=${totalSales}, Returns=${totalSaleReturns}, Net=${netSales}`);
           break;
         }
 
@@ -1845,13 +1930,13 @@ export const ReportsManager: React.FC = () => {
                     )}
                     {selectedReport === 'sales-report' && (
                       <>
+                        <TableHead>Type</TableHead>
                         <TableHead>Invoice #</TableHead>
                         <TableHead>Date</TableHead>
                         <TableHead>Customer</TableHead>
                         <TableHead className="text-right">Subtotal</TableHead>
                         <TableHead className="text-right">Tax</TableHead>
                         <TableHead className="text-right">Total</TableHead>
-                        <TableHead className="text-right">Paid</TableHead>
                         <TableHead>Status</TableHead>
                       </>
                     )}
@@ -1957,15 +2042,19 @@ export const ReportsManager: React.FC = () => {
                       )}
                       {selectedReport === 'sales-report' && (
                         <>
+                          <TableCell>
+                            <Badge variant={
+                              row.record_type === 'Sale Return' ? 'destructive' : 'default'
+                            }>
+                              {row.record_type || 'Sales'}
+                            </Badge>
+                          </TableCell>
                           <TableCell className="font-medium">{row.invoice_number || row.subcategory}</TableCell>
                           <TableCell>{row.invoice_date ? formatDate(row.invoice_date) : row.category}</TableCell>
                           <TableCell>{row.customer || 'N/A'}</TableCell>
                           <TableCell className="text-right">{formatIndianCurrency(row.subtotal || 0)}</TableCell>
                           <TableCell className="text-right">{formatIndianCurrency(row.tax_amount || 0)}</TableCell>
                           <TableCell className="text-right">{formatIndianCurrency(row.amount)}</TableCell>
-                          <TableCell className="text-right">
-                            {formatIndianCurrency((row.payment_status === 'paid' ? row.amount : 0) || 0)}
-                          </TableCell>
                           <TableCell>
                             <Badge variant={row.payment_status === 'paid' ? 'default' : 'outline'}>
                               {row.payment_status || 'due'}
@@ -2207,26 +2296,26 @@ export const ReportsManager: React.FC = () => {
                   <>
                     <div className="text-center">
                       <p className="text-sm text-muted-foreground">Total Sales</p>
-                      <p className="text-lg font-semibold text-green-500">
+                      <p className="text-lg font-semibold text-blue-500">
                         {formatIndianCurrency(summary.totalSales)}
+                      </p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm text-muted-foreground">Sale Returns</p>
+                      <p className="text-lg font-semibold text-red-500">
+                        {formatIndianCurrency(summary.saleReturns || 0)}
+                      </p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm text-muted-foreground">Net Sales</p>
+                      <p className="text-lg font-semibold text-green-500">
+                        {formatIndianCurrency(summary.netSales || summary.totalSales)}
                       </p>
                     </div>
                     <div className="text-center">
                       <p className="text-sm text-muted-foreground">Total Tax</p>
                       <p className="text-lg font-semibold text-blue-500">
                         {formatIndianCurrency(summary.grossProfit)}
-                      </p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-sm text-muted-foreground">Total Collected</p>
-                      <p className="text-lg font-semibold text-green-500">
-                        {formatIndianCurrency(0)}
-                      </p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-sm text-muted-foreground">Outstanding</p>
-                      <p className="text-lg font-semibold text-red-500">
-                        {formatIndianCurrency(summary.netProfit)}
                       </p>
                     </div>
                   </>
