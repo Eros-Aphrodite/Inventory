@@ -168,26 +168,66 @@ export const StockTakeManager = () => {
     }
 
     setSaving(true);
-    try {
-      for (const item of selectedItems) {
-        const { error } = await supabase
-          .from('products')
-          .update({ current_stock: item.counted_quantity })
-          .eq('id', item.id);
+    let successCount = 0;
+    let failedCount = 0;
+    const failedItems: string[] = [];
 
-        if (error) throw error;
+    try {
+      // Update all items with proper error handling per item
+      for (const item of selectedItems) {
+        try {
+          let updateQuery = supabase
+            .from('products')
+            .update({ current_stock: item.counted_quantity })
+            .eq('id', item.id);
+
+          // Add company_id filter for data integrity
+          if (selectedCompany?.company_name) {
+            updateQuery = updateQuery.eq('company_id', selectedCompany.company_name);
+          }
+
+          const { error } = await updateQuery;
+
+          if (error) {
+            console.error(`Error updating ${item.name}:`, error);
+            failedItems.push(item.name);
+            failedCount++;
+          } else {
+            successCount++;
+          }
+        } catch (itemError) {
+          console.error(`Error updating ${item.name}:`, itemError);
+          failedItems.push(item.name);
+          failedCount++;
+        }
       }
 
-      toast({
-        title: "Success",
-        description: `Updated ${selectedItems.length} product quantities`
-      });
-      
-      fetchProducts();
+      // Show results
+      if (successCount > 0 && failedCount === 0) {
+        toast({
+          title: "Success",
+          description: `Updated ${successCount} product quantities successfully`
+        });
+        fetchProducts();
+      } else if (successCount > 0 && failedCount > 0) {
+        toast({
+          title: "Partial Success",
+          description: `Updated ${successCount} products. ${failedCount} failed: ${failedItems.slice(0, 3).join(', ')}${failedItems.length > 3 ? '...' : ''}`,
+          variant: "default"
+        });
+        fetchProducts();
+      } else {
+        toast({
+          title: "Error",
+          description: `Failed to update all ${failedCount} products: ${failedItems.slice(0, 3).join(', ')}${failedItems.length > 3 ? '...' : ''}`,
+          variant: "destructive"
+        });
+      }
     } catch (error) {
+      console.error('Bulk update error:', error);
       toast({
-        title: "Error", 
-        description: "Failed to update quantities",
+        title: "Error",
+        description: `Failed to update quantities: ${error instanceof Error ? error.message : 'Unknown error'}`,
         variant: "destructive"
       });
     } finally {

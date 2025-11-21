@@ -567,7 +567,7 @@ export const InvoiceManager = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('User not authenticated');
 
-      // Validate: Customer invoices require an entity, other types can use "Open Items" (no entity)
+      // Validate: Customer invoices require an entity, other types can use "Billing Name" (no entity)
       if (formData.entity_type === 'customer' && !formData.entity_id) {
         toast({
           title: "Validation Error",
@@ -1003,20 +1003,47 @@ export const InvoiceManager = () => {
 
       if (error) throw error;
       
-      // Fetch company info from profile
+      // Fetch company info from profile - use selected company, not first one
       const { data: profileData } = await supabase
         .from('profiles')
         .select('business_entities')
         .eq('id', (await supabase.auth.getUser()).data.user?.id)
         .single();
 
-      const companyInfo = profileData?.business_entities?.[0] || {
-        company_name: "Your Company Name",
-        address: "Your Company Address",
-        phone: "Your Phone",
-        owner_phone: "Your Phone",
-        gst: "Your GSTIN"
-      };
+      // Find the selected company in the business_entities array
+      let companyInfo: any;
+      if (profileData?.business_entities && Array.isArray(profileData.business_entities) && selectedCompany) {
+        const businessEntity = profileData.business_entities.find(
+          (entity: any) => entity.company_name === selectedCompany.company_name
+        );
+        
+        if (businessEntity) {
+          companyInfo = businessEntity;
+        } else {
+          // If company not found in array, use selectedCompany data
+          companyInfo = {
+            company_name: selectedCompany.company_name || "Your Company Name",
+            address: selectedCompany.address || "Your Company Address",
+            phone: selectedCompany.phone || selectedCompany.owner_phone || "Your Phone",
+            owner_phone: selectedCompany.owner_phone || "Your Phone",
+            gst: selectedCompany.gst || selectedCompany.gstin || "Your GSTIN",
+            email: selectedCompany.email || ""
+          };
+        }
+      } else {
+        // Fallback if no business entities found or no selected company
+        companyInfo = {
+          company_name: selectedCompany?.company_name || "Your Company Name",
+          address: selectedCompany?.address || "Your Company Address",
+          phone: selectedCompany?.phone || selectedCompany?.owner_phone || "Your Phone",
+          owner_phone: selectedCompany?.owner_phone || "Your Phone",
+          gst: selectedCompany?.gst || selectedCompany?.gstin || "Your GSTIN",
+          email: selectedCompany?.email || ""
+        };
+      }
+      
+      // Get user email for company info
+      const { data: { user } } = await supabase.auth.getUser();
       
       // Generate and download PDF
       const pdfDoc = (
@@ -1027,8 +1054,8 @@ export const InvoiceManager = () => {
             name: companyInfo.company_name || "Your Company Name",
             address: companyInfo.address || "Your Company Address",
             phone: companyInfo.phone || companyInfo.owner_phone || "Your Phone",
-            email: (await supabase.auth.getUser()).data.user?.email || "your@email.com",
-            gstin: companyInfo.gst || "Your GSTIN"
+            email: companyInfo.email || user?.email || "your@email.com",
+            gstin: companyInfo.gst || companyInfo.gstin || "Your GSTIN"
           }}
         />
       );
@@ -1493,7 +1520,14 @@ export const InvoiceManager = () => {
                 </div>
                 <div>
                   <Label htmlFor="entity_type">Entity Type</Label>
-                  <Select value={formData.entity_type} onValueChange={(value) => setFormData(prev => ({ ...prev, entity_type: value, entity_id: "" }))}>
+                  <Select value={formData.entity_type} onValueChange={(value) => {
+                    // Clear PO selection if switching to non-supplier/non-wholesaler entity type
+                    if (value !== 'supplier' && value !== 'wholesaler') {
+                      setSelectedPO("");
+                      setPOItems([]);
+                    }
+                    setFormData(prev => ({ ...prev, entity_type: value, entity_id: "" }));
+                  }}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select entity type" />
                     </SelectTrigger>
@@ -1534,14 +1568,14 @@ export const InvoiceManager = () => {
                     }
                   }}>
                     <SelectTrigger className="flex-1">
-                      <SelectValue placeholder={formData.entity_type === 'customer' ? "Select entity" : "Select entity or use Open Items"} />
+                      <SelectValue placeholder={formData.entity_type === 'customer' ? "Select entity" : "Select entity or use Billing Name"} />
                     </SelectTrigger>
                     <SelectContent className="max-h-[300px] custom-scrollbar-dark">
-                      {/* Open Items option for non-customer invoices */}
+                      {/* Billing Name option for non-customer invoices */}
                       {formData.entity_type !== 'customer' && (
                         <SelectItem value="open-items">
                           <span className="flex items-center gap-2">
-                            <span className="font-medium">Open Items</span>
+                            <span className="font-medium">Billing Name</span>
                             <span className="text-xs text-muted-foreground">(No specific entity)</span>
                           </span>
                         </SelectItem>
@@ -1578,13 +1612,15 @@ export const InvoiceManager = () => {
                 </div>
                 {formData.entity_type !== 'customer' && !formData.entity_id && (
                   <p className="text-xs text-muted-foreground mt-1">
-                    Open Items: Invoice will be created without a specific {formData.entity_type} entity
+                    Billing Name: Invoice will be created without a specific {formData.entity_type} entity
                   </p>
                 )}
               </div>
 
               {/* Purchase Order Selection for Purchase Invoice and Purchase Return */}
-              {(formData.invoice_type === 'purchase' || formData.invoice_type === 'purchase_return') && (
+              {/* PO selection only available for suppliers and wholesalers */}
+              {(formData.invoice_type === 'purchase' || formData.invoice_type === 'purchase_return') && 
+               (formData.entity_type === 'supplier' || formData.entity_type === 'wholesaler') && (
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <Label htmlFor="purchase_order">Purchase Order {formData.invoice_type === 'purchase_return' ? '(Select PO to return)' : '(Select PO to invoice)'}</Label>

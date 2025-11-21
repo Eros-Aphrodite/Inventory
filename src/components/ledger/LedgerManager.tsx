@@ -639,7 +639,7 @@ export const LedgerManager = () => {
                         <SelectItem value="bank">Bank</SelectItem>
                         <SelectItem value="receivables">Receivables</SelectItem>
                         <SelectItem value="payables">Payables</SelectItem>
-                        <SelectItem value="expenses">Expenses</SelectItem>
+                        <SelectItem value="expense">Expenses</SelectItem>
                         <SelectItem value="income">Income</SelectItem>
                       </SelectContent>
                     </Select>

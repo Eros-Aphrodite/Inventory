@@ -301,12 +301,12 @@ export const PurchaseOrderManager = () => {
     }
   };
 
-  // Fetch company state from profile
+  // Fetch company state from profile - use selected company
   useEffect(() => {
     const fetchCompanyState = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        if (!user || !selectedCompany) return;
 
         const { data: profileData } = await supabase
           .from('profiles')
@@ -314,8 +314,18 @@ export const PurchaseOrderManager = () => {
           .eq('id', user.id)
           .single();
 
-        if (profileData?.business_entities?.[0]?.state) {
-          setCompanyState(profileData.business_entities[0].state);
+        if (profileData?.business_entities && Array.isArray(profileData.business_entities)) {
+          // Find the selected company's state
+          const businessEntity = profileData.business_entities.find(
+            (entity: any) => entity.company_name === selectedCompany.company_name
+          );
+          
+          if (businessEntity?.state) {
+            setCompanyState(businessEntity.state);
+          } else if (selectedCompany.state) {
+            // Fallback to selectedCompany state
+            setCompanyState(selectedCompany.state);
+          }
         }
       } catch (error) {
         console.error('Failed to fetch company state:', error);
@@ -409,6 +419,9 @@ export const PurchaseOrderManager = () => {
       // Refresh suppliers list to ensure it's up to date
       await fetchSuppliers();
       
+      // Force a small delay to ensure state propagation
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
       // Select the new supplier
       setFormData(prev => ({ ...prev, supplier_id: data.id }));
       
@@ -423,6 +436,11 @@ export const PurchaseOrderManager = () => {
         pan: ""
       });
       setSupplierDialogOpen(false);
+      
+      // Ensure suppliers are refreshed after dialog closes
+      setTimeout(() => {
+        fetchSuppliers();
+      }, 200);
 
       toast({
         title: "Success",
@@ -635,19 +653,47 @@ export const PurchaseOrderManager = () => {
         }
       }
       
-      // Fetch company info from profile
+      // Fetch company info from profile - use selected company, not first one
       const { data: profileData } = await supabase
         .from('profiles')
         .select('business_entities')
         .eq('id', (await supabase.auth.getUser()).data.user?.id)
         .single();
 
-      const companyInfo = profileData?.business_entities?.[0] || {
-        company_name: "Your Company Name",
-        address: "Your Company Address",
-        owner_phone: "Your Phone",
-        gst: "Your GSTIN"
-      };
+      // Find the selected company in the business_entities array
+      let companyInfo: any;
+      if (profileData?.business_entities && Array.isArray(profileData.business_entities) && selectedCompany) {
+        const businessEntity = profileData.business_entities.find(
+          (entity: any) => entity.company_name === selectedCompany.company_name
+        );
+        
+        if (businessEntity) {
+          companyInfo = businessEntity;
+        } else {
+          // If company not found in array, use selectedCompany data
+          companyInfo = {
+            company_name: selectedCompany.company_name || "Your Company Name",
+            address: selectedCompany.address || "Your Company Address",
+            phone: selectedCompany.phone || selectedCompany.owner_phone || "Your Phone",
+            owner_phone: selectedCompany.owner_phone || "Your Phone",
+            gst: selectedCompany.gst || selectedCompany.gstin || "Your GSTIN",
+            email: selectedCompany.email || ""
+          };
+        }
+      } else {
+        // Fallback if no business entities found or no selected company
+        companyInfo = {
+          company_name: selectedCompany?.company_name || "Your Company Name",
+          address: selectedCompany?.address || "Your Company Address",
+          phone: selectedCompany?.phone || selectedCompany?.owner_phone || "Your Phone",
+          owner_phone: selectedCompany?.owner_phone || "Your Phone",
+          gst: selectedCompany?.gst || selectedCompany?.gstin || "Your GSTIN",
+          email: selectedCompany?.email || ""
+        };
+      }
+      
+      // Get user email for company info
+      const { data: { user } } = await supabase.auth.getUser();
       
       // Generate and download PDF
       const pdfDoc = (
@@ -666,9 +712,9 @@ export const PurchaseOrderManager = () => {
           companyInfo={{
             name: companyInfo.company_name || "Your Company Name",
             address: companyInfo.address || "Your Company Address",
-            phone: companyInfo.owner_phone || "Your Phone",
-            email: (await supabase.auth.getUser()).data.user?.email || "your@email.com",
-            gstin: companyInfo.gst || "Your GSTIN"
+            phone: companyInfo.phone || companyInfo.owner_phone || "Your Phone",
+            email: companyInfo.email || user?.email || "your@email.com",
+            gstin: companyInfo.gst || companyInfo.gstin || "Your GSTIN"
           }}
         />
       );
@@ -913,7 +959,7 @@ export const PurchaseOrderManager = () => {
               Create Purchase Order
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto modal-scrollbar smooth-scroll">
             <DialogHeader>
               <DialogTitle>Create New Purchase Order</DialogTitle>
             </DialogHeader>
@@ -922,13 +968,19 @@ export const PurchaseOrderManager = () => {
                 <div>
                   <Label htmlFor="supplier_id">Supplier</Label>
                   <div className="flex gap-2">
-                    <Select value={formData.supplier_id} onValueChange={(value) => {
-                      if (value === "add_new") {
-                        setSupplierDialogOpen(true);
-                      } else {
-                        setFormData(prev => ({ ...prev, supplier_id: value }));
-                      }
-                    }}>
+                    <Select 
+                      key={suppliers.length} // Force re-render when suppliers list changes
+                      value={formData.supplier_id} 
+                      onValueChange={(value) => {
+                        if (value === "add_new") {
+                          setSupplierDialogOpen(true);
+                          // Refresh suppliers when opening dialog to ensure latest list
+                          fetchSuppliers();
+                        } else {
+                          setFormData(prev => ({ ...prev, supplier_id: value }));
+                        }
+                      }}
+                    >
                       <SelectTrigger className="flex-1">
                         <SelectValue placeholder="Select supplier" />
                       </SelectTrigger>
@@ -1051,8 +1103,12 @@ export const PurchaseOrderManager = () => {
                                 
                                 // Filter by low stock if checkbox is checked
                                 if (showLowStockOnly) {
-                                  const currentStock = p.current_stock || 0;
-                                  const minStock = p.min_stock_level || 0;
+                                  // Only show products that have min_stock_level set AND current_stock <= min_stock_level
+                                  if (p.min_stock_level == null || p.min_stock_level === undefined) {
+                                    return false; // Exclude products without min_stock_level set
+                                  }
+                                  const currentStock = p.current_stock ?? 0;
+                                  const minStock = p.min_stock_level;
                                   if (currentStock > minStock) return false; // Only show if stock is at or below min level
                                 }
                                 

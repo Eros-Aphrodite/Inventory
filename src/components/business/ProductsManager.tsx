@@ -418,7 +418,7 @@ export const ProductsManager = () => {
               Add Product
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto modal-scrollbar smooth-scroll">
             <DialogHeader>
               <DialogTitle>
                 {editingProduct ? "Edit Product" : "Add New Product"}
@@ -655,8 +655,14 @@ export const ProductsManager = () => {
             {products
               .filter((p) => {
                 // Apply low stock filter
-                if (showLowStockOnly && (p.current_stock || 0) > (p.min_stock_level || 0)) {
-                  return false;
+                if (showLowStockOnly) {
+                  // Only show products that have min_stock_level set AND current_stock <= min_stock_level
+                  if (p.min_stock_level == null || p.min_stock_level === undefined) {
+                    return false; // Exclude products without min_stock_level set
+                  }
+                  const currentStock = p.current_stock ?? 0;
+                  const minStock = p.min_stock_level;
+                  if (currentStock > minStock) return false; // Only show if stock is at or below min level
                 }
                 
                 // Apply search filter

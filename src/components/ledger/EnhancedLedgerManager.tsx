@@ -559,7 +559,7 @@ export const EnhancedLedgerManager: React.FC = () => {
       {/* View Entries Modal */}
       {showEntriesModal && selectedLedger && (
         <Dialog open={showEntriesModal} onOpenChange={setShowEntriesModal}>
-          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto modal-scrollbar smooth-scroll">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <BookOpen className="w-5 h-5" />

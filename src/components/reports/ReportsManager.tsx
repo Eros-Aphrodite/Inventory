@@ -361,22 +361,60 @@ export const ReportsManager: React.FC = () => {
           }
 
           // Calculate indirect income and expenses from ledgers separately
-          // Income ledgers: credit increases income, debit decreases income
-          // Expense ledgers: debit increases expense, credit decreases expense
+          // Include all ledger types with appropriate mapping rules:
+          // - income: credit = income, debit = expense reduction
+          // - expense: debit = expense, credit = expense reduction
+          // - cash: credit = income (receipts), debit = expense (payments)
+          // - bank: credit = income (deposits), debit = expense (withdrawals)
+          // - receivables: credit = income (collections), debit = expense (write-offs)
+          // - payables: debit = expense (payments), credit = income (reversals)
           const indirectIncome = (ledgerEntries || []).reduce((sum, entry) => {
-            if (entry.ledger_type === 'income') {
-              // For income: credit is income, debit is reversal/refund
-              return sum + ((entry.credit_amount || 0) - (entry.debit_amount || 0));
+            const ledgerType = entry.ledger_type?.toLowerCase();
+            const credit = entry.credit_amount || 0;
+            const debit = entry.debit_amount || 0;
+            
+            switch (ledgerType) {
+              case 'income':
+                // For income: credit is income, debit is reversal/refund
+                return sum + (credit - debit);
+              case 'cash':
+              case 'bank':
+                // Credit = income (receipts/deposits)
+                return sum + credit;
+              case 'receivables':
+                // Credit = income (collections)
+                return sum + credit;
+              case 'payables':
+                // Credit = income (reversals)
+                return sum + credit;
+              default:
+                return sum;
             }
-            return sum;
           }, 0);
           
           const indirectExpensesFromLedgers = (ledgerEntries || []).reduce((sum, entry) => {
-            if (entry.ledger_type === 'expense') {
-              // For expenses: debit is expense, credit is reversal/refund
-              return sum + ((entry.debit_amount || 0) - (entry.credit_amount || 0));
+            const ledgerType = entry.ledger_type?.toLowerCase();
+            const credit = entry.credit_amount || 0;
+            const debit = entry.debit_amount || 0;
+            
+            switch (ledgerType) {
+              case 'expense':
+              case 'expenses': // Support both for backward compatibility
+                // For expenses: debit is expense, credit is reversal/refund
+                return sum + (debit - credit);
+              case 'cash':
+              case 'bank':
+                // Debit = expense (payments/withdrawals)
+                return sum + debit;
+              case 'receivables':
+                // Debit = expense (write-offs)
+                return sum + debit;
+              case 'payables':
+                // Debit = expense (payments)
+                return sum + debit;
+              default:
+                return sum;
             }
-            return sum;
           }, 0);
           
           // Total indirect expenses = labour + transport + ledger expenses
