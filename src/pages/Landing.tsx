@@ -584,7 +584,9 @@ const Landing = () => {
                   { name: 'Features', href: '#features' },
                   { name: 'Pricing', href: '#pricing' },
                   { name: 'Support', onClick: handleSupport },
-                  { name: 'Login', onClick: handleSignIn }
+                  { name: 'Login', onClick: handleSignIn },
+                  { name: 'Privacy Policy', href: '/policy' },
+                  { name: 'Terms of Service', href: '/terms' }
                 ].map((link, idx) => (
                   <li key={idx}>
                     {link.onClick ? (
@@ -662,10 +664,10 @@ const Landing = () => {
               © 2025 Inventory Migrator. All rights reserved.
             </div>
             <div className="flex items-center gap-6">
-              <a href="#" className="text-white/60 hover:text-primary text-sm transition-colors duration-200">
+              <a href="/policy" className="text-white/60 hover:text-primary text-sm transition-colors duration-200">
                 Privacy Policy
               </a>
-              <a href="#" className="text-white/60 hover:text-primary text-sm transition-colors duration-200">
+              <a href="/terms" className="text-white/60 hover:text-primary text-sm transition-colors duration-200">
                 Terms of Service
               </a>
             </div>
