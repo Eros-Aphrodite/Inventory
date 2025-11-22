@@ -76,7 +76,8 @@ const REPORT_TYPES = [
   { id: 'payment-report', name: 'Payment Report', icon: <FileText className="h-4 w-4" /> },
   { id: 'ledger-summary', name: 'Ledger Summary', icon: <FileText className="h-4 w-4" /> },
   { id: 'invoice-aging', name: 'Invoice Aging Report', icon: <BarChart3 className="h-4 w-4" /> },
-  { id: 'return-void-report', name: 'Return/Void Invoice Report', icon: <FileText className="h-4 w-4" /> }
+  { id: 'return-void-report', name: 'Return/Void Invoice Report', icon: <FileText className="h-4 w-4" /> },
+  { id: 'inventory-report', name: 'Inventory Report', icon: <Package className="h-4 w-4" /> }
 ];
 
 export const ReportsManager: React.FC = () => {
@@ -947,10 +948,19 @@ export const ReportsManager: React.FC = () => {
               const debits = Number(entries.debits) || 0;
               const credits = Number(entries.credits) || 0;
               
-              // Closing balance = Opening + Credits - Debits (for liability/equity)
-              // Or Opening + Debits - Credits (for asset/expense)
-              const isCreditBalance = ['capital', 'equity', 'loan', 'payables', 'liability', 'income'].includes(l.ledger_type?.toLowerCase() || '');
-              const closingBalance = isCreditBalance 
+              // Determine account type for proper balance calculation based on accounting rules
+              // Credit balance accounts: Capital, Equity, Loan, Payables, Liability, Income, Revenue, Sundry Creditor
+              // Debit balance accounts: Assets, Expenses, Cash, Bank, Receivables, Fixed Assets, Sundry Debtor
+              const ledgerTypeLower = (l.ledger_type || '').toLowerCase();
+              const isCreditBalanceAccount = [
+                'capital', 'equity', 'loan', 'payables', 'liability', 'income',
+                'sundry creditor', 'creditor', 'revenue', 'secondary loan', 'unsecured loan'
+              ].includes(ledgerTypeLower);
+              
+              // Calculate closing balance based on account type
+              // Credit balance: Opening + Credits - Debits (for Capital, Liabilities, Income)
+              // Debit balance: Opening + Debits - Credits (for Assets, Expenses)
+              const closingBalance = isCreditBalanceAccount
                 ? openingBalance + credits - debits
                 : openingBalance + debits - credits;
               
@@ -1345,9 +1355,19 @@ export const ReportsManager: React.FC = () => {
               const debits = Number(entries.debits) || 0;
               const credits = Number(entries.credits) || 0;
               
-              // Closing balance calculation
-              const isCreditBalance = ['capital', 'equity', 'loan', 'payables', 'liability', 'income'].includes(l.ledger_type?.toLowerCase() || '');
-              const closingBalance = isCreditBalance 
+              // Determine account type for proper balance calculation based on accounting rules
+              // Credit balance accounts: Capital, Equity, Loan, Payables, Liability, Income, Revenue, Sundry Creditor
+              // Debit balance accounts: Assets, Expenses, Cash, Bank, Receivables, Fixed Assets, Sundry Debtor
+              const ledgerTypeLower = (l.ledger_type || '').toLowerCase();
+              const isCreditBalanceAccount = [
+                'capital', 'equity', 'loan', 'payables', 'liability', 'income',
+                'sundry creditor', 'creditor', 'revenue', 'secondary loan', 'unsecured loan'
+              ].includes(ledgerTypeLower);
+              
+              // Calculate closing balance based on account type
+              // Credit balance: Opening + Credits - Debits (for Capital, Liabilities, Income)
+              // Debit balance: Opening + Debits - Credits (for Assets, Expenses)
+              const closingBalance = isCreditBalanceAccount
                 ? openingBalance + credits - debits
                 : openingBalance + debits - credits;
               
@@ -1557,6 +1577,73 @@ export const ReportsManager: React.FC = () => {
           }
           break;
         }
+
+        case 'inventory-report': {
+          try {
+            // Fetch all products for the company
+            const { data: products, error: productsError } = await supabase
+              .from('products')
+              .select('id, name, description, hsn_code, current_stock, purchase_price, selling_price, gst_rate, min_stock_level')
+              .eq('company_id', selectedCompany.company_name)
+              .order('name', { ascending: true });
+
+            if (productsError) {
+              console.error('Error fetching products:', productsError);
+              throw productsError;
+            }
+
+            // Map products to report rows
+            sampleData = (products || []).map((product: any) => {
+              const stockValue = (product.current_stock || 0) * (product.purchase_price || 0);
+              const isLowStock = product.min_stock_level && (product.current_stock || 0) < product.min_stock_level;
+              
+              return {
+                subcategory: product.name || 'Unknown',
+                amount: stockValue,
+                category: product.description || '',
+                product_name: product.name || '',
+                description: product.description || '',
+                hsn_code: product.hsn_code || '',
+                current_stock: product.current_stock || 0,
+                purchase_price: product.purchase_price || 0,
+                selling_price: product.selling_price || 0,
+                gst_rate: product.gst_rate || 0,
+                min_stock_level: product.min_stock_level || 0,
+                stock_value: stockValue,
+                is_low_stock: isLowStock
+              };
+            });
+
+            // Calculate totals
+            const totalProducts = products?.length || 0;
+            const totalStockValue = sampleData.reduce((sum, item: any) => sum + (item.stock_value || 0), 0);
+            const lowStockCount = sampleData.filter((item: any) => item.is_low_stock).length;
+
+            newSummary = {
+              totalSales: totalProducts,
+              totalPurchases: totalStockValue,
+              grossProfit: lowStockCount,
+              netProfit: totalStockValue
+            };
+
+            console.log(`Inventory report: Found ${totalProducts} products, Total stock value: ${totalStockValue}`);
+          } catch (error: any) {
+            console.error('Error in inventory-report:', error);
+            toast({
+              title: "Error",
+              description: error.message || "Failed to fetch inventory data. Please try again.",
+              variant: "destructive"
+            });
+            sampleData = [];
+            newSummary = {
+              totalSales: 0,
+              totalPurchases: 0,
+              grossProfit: 0,
+              netProfit: 0
+            };
+          }
+          break;
+        }
         
         default: {
           sampleData = [];
@@ -1675,6 +1762,29 @@ export const ReportsManager: React.FC = () => {
             }));
             break;
 
+          case 'inventory-report':
+            columns = [
+              { key: 'product_name', label: 'Product Name', width: '25%', align: 'left' },
+              { key: 'hsn_code', label: 'HSN Code', width: '12%', align: 'left' },
+              { key: 'current_stock', label: 'Stock', width: '10%', align: 'right' },
+              { key: 'purchase_price', label: 'Purchase Price', width: '12%', align: 'right', format: 'currency' },
+              { key: 'selling_price', label: 'Selling Price', width: '12%', align: 'right', format: 'currency' },
+              { key: 'gst_rate', label: 'GST %', width: '8%', align: 'right' },
+              { key: 'stock_value', label: 'Stock Value', width: '15%', align: 'right', format: 'currency' },
+              { key: 'status', label: 'Status', width: '6%', align: 'left' }
+            ];
+            formattedData = reportData.map(row => ({
+              product_name: (row as any).product_name || row.subcategory || '',
+              hsn_code: (row as any).hsn_code || '',
+              current_stock: (row as any).current_stock || 0,
+              purchase_price: (row as any).purchase_price || 0,
+              selling_price: (row as any).selling_price || 0,
+              gst_rate: (row as any).gst_rate || 0,
+              stock_value: (row as any).stock_value || row.amount || 0,
+              status: (row as any).is_low_stock ? 'Low Stock' : 'In Stock'
+            }));
+            break;
+
           case 'sales-report':
             columns = [
               { key: 'invoice_number', label: 'Invoice #', width: '15%', align: 'left' },
@@ -1757,6 +1867,25 @@ export const ReportsManager: React.FC = () => {
             }));
             break;
 
+          case 'ledger-summary':
+            columns = [
+              { key: 'subcategory', label: 'Account Name', width: '30%', align: 'left' },
+              { key: 'category', label: 'Type', width: '20%', align: 'left' },
+              { key: 'opening_balance', label: 'Opening Balance', width: '15%', align: 'right', format: 'currency' },
+              { key: 'debits', label: 'Debits', width: '12%', align: 'right', format: 'currency' },
+              { key: 'credits', label: 'Credits', width: '12%', align: 'right', format: 'currency' },
+              { key: 'closing_balance', label: 'Closing Balance', width: '11%', align: 'right', format: 'currency' }
+            ];
+            formattedData = reportData.map((row: any) => ({
+              subcategory: row.subcategory || '',
+              category: row.category || '',
+              opening_balance: Number(row.opening_balance) || 0,
+              debits: Number(row.debits) || 0,
+              credits: Number(row.credits) || 0,
+              closing_balance: Number(row.closing_balance) || 0
+            }));
+            break;
+
           default:
             // Generic report format
             columns = [
@@ -1771,19 +1900,36 @@ export const ReportsManager: React.FC = () => {
             }));
         }
 
-        // Create summary array
+        // Create summary array with proper labels based on report type
         const summaryItems = [];
-        if (summary.totalSales !== 0) {
-          summaryItems.push({ label: 'Total Sales', value: summary.totalSales, format: 'currency' as const });
-        }
-        if (summary.totalPurchases !== 0) {
-          summaryItems.push({ label: 'Total Purchases', value: summary.totalPurchases, format: 'currency' as const });
-        }
-        if (summary.grossProfit !== 0) {
-          summaryItems.push({ label: 'Gross Profit', value: summary.grossProfit, format: 'currency' as const });
-        }
-        if (summary.netProfit !== 0) {
-          summaryItems.push({ label: 'Net Profit', value: summary.netProfit, format: 'currency' as const });
+        if (selectedReport === 'ledger-summary') {
+          // Ledger summary specific labels
+          if (summary.totalSales !== 0) {
+            summaryItems.push({ label: 'Total Credits', value: summary.totalSales, format: 'currency' as const });
+          }
+          if (summary.totalPurchases !== 0) {
+            summaryItems.push({ label: 'Total Debits', value: summary.totalPurchases, format: 'currency' as const });
+          }
+          if (summary.grossProfit !== 0) {
+            summaryItems.push({ label: 'Net Change', value: summary.grossProfit, format: 'currency' as const });
+          }
+          if (summary.netProfit !== 0) {
+            summaryItems.push({ label: 'Total Closing Balance', value: summary.netProfit, format: 'currency' as const });
+          }
+        } else {
+          // Standard summary labels for other reports
+          if (summary.totalSales !== 0) {
+            summaryItems.push({ label: 'Total Sales', value: summary.totalSales, format: 'currency' as const });
+          }
+          if (summary.totalPurchases !== 0) {
+            summaryItems.push({ label: 'Total Purchases', value: summary.totalPurchases, format: 'currency' as const });
+          }
+          if (summary.grossProfit !== 0) {
+            summaryItems.push({ label: 'Gross Profit', value: summary.grossProfit, format: 'currency' as const });
+          }
+          if (summary.netProfit !== 0) {
+            summaryItems.push({ label: 'Net Profit', value: summary.netProfit, format: 'currency' as const });
+          }
         }
 
         const reportDataForPDF = {
@@ -1943,6 +2089,7 @@ export const ReportsManager: React.FC = () => {
                     {selectedReport === 'ledger-summary' && 'Ledger Summary'}
                     {selectedReport === 'invoice-aging' && 'Invoice Aging Report'}
                     {selectedReport === 'return-void-report' && 'Return/Void Invoice Report'}
+                    {selectedReport === 'inventory-report' && 'Inventory Report'}
                     {selectedCompany && (
                       <span className="text-muted-foreground font-normal text-base ml-2">
                         ({selectedCompany.company_name})
@@ -2051,6 +2198,18 @@ export const ReportsManager: React.FC = () => {
                         <TableHead className="text-right">Total</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Notes</TableHead>
+                      </>
+                    )}
+                    {selectedReport === 'inventory-report' && (
+                      <>
+                        <TableHead>Product Name</TableHead>
+                        <TableHead>HSN Code</TableHead>
+                        <TableHead className="text-right">Current Stock</TableHead>
+                        <TableHead className="text-right">Purchase Price</TableHead>
+                        <TableHead className="text-right">Selling Price</TableHead>
+                        <TableHead className="text-right">GST %</TableHead>
+                        <TableHead className="text-right">Stock Value</TableHead>
+                        <TableHead>Status</TableHead>
                       </>
                     )}
                     {selectedReport === 'invoice-aging' && (
@@ -2215,6 +2374,24 @@ export const ReportsManager: React.FC = () => {
                           </TableCell>
                         </>
                       )}
+                      {selectedReport === 'inventory-report' && (
+                        <>
+                          <TableCell className="font-medium">{(row as any).product_name || row.subcategory}</TableCell>
+                          <TableCell>{(row as any).hsn_code || 'N/A'}</TableCell>
+                          <TableCell className="text-right">{(row as any).current_stock || 0}</TableCell>
+                          <TableCell className="text-right">{formatIndianCurrency((row as any).purchase_price || 0)}</TableCell>
+                          <TableCell className="text-right">{formatIndianCurrency((row as any).selling_price || 0)}</TableCell>
+                          <TableCell className="text-right">{(row as any).gst_rate || 0}%</TableCell>
+                          <TableCell className="text-right font-medium">{formatIndianCurrency((row as any).stock_value || row.amount || 0)}</TableCell>
+                          <TableCell>
+                            {(row as any).is_low_stock ? (
+                              <Badge variant="destructive">Low Stock</Badge>
+                            ) : (
+                              <Badge variant="default">In Stock</Badge>
+                            )}
+                          </TableCell>
+                        </>
+                      )}
                       {selectedReport === 'invoice-aging' && (
                         <>
                           <TableCell className="font-medium">{row.invoice_number || row.subcategory}</TableCell>
@@ -2346,6 +2523,29 @@ export const ReportsManager: React.FC = () => {
                       <p className="text-sm text-muted-foreground">Total Records</p>
                       <p className="text-lg font-semibold">
                         {reportData.length}
+                      </p>
+                    </div>
+                  </>
+                )}
+                
+                {selectedReport === 'inventory-report' && (
+                  <>
+                    <div className="text-center">
+                      <p className="text-sm text-muted-foreground">Total Products</p>
+                      <p className="text-lg font-semibold">
+                        {summary.totalSales}
+                      </p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm text-muted-foreground">Total Stock Value</p>
+                      <p className="text-lg font-semibold text-green-500">
+                        {formatIndianCurrency(summary.totalPurchases)}
+                      </p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-sm text-muted-foreground">Low Stock Items</p>
+                      <p className="text-lg font-semibold text-destructive">
+                        {summary.grossProfit}
                       </p>
                     </div>
                   </>

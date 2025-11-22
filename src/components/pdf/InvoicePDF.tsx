@@ -25,6 +25,14 @@ interface Invoice {
     email?: string;
     gstin?: string;
   };
+  business_entities?: {
+    name: string;
+    entity_type: string;
+    address?: string;
+    phone?: string;
+    email?: string;
+    gstin?: string;
+  };
 }
 
 interface InvoicePDFProps {
@@ -163,11 +171,29 @@ export const InvoicePDF: React.FC<InvoicePDFProps> = ({
         
         <View style={styles.supplierInfo}>
           <Text style={styles.label}>To:</Text>
-          <Text style={styles.text}>{invoice.suppliers?.company_name || 'N/A'}</Text>
-          {invoice.suppliers?.address && <Text style={styles.text}>{invoice.suppliers.address}</Text>}
-          {invoice.suppliers?.phone && <Text style={styles.text}>Phone: {invoice.suppliers.phone}</Text>}
-          {invoice.suppliers?.email && <Text style={styles.text}>Email: {invoice.suppliers.email}</Text>}
-          {invoice.suppliers?.gstin && <Text style={styles.text}>GSTIN: {invoice.suppliers.gstin}</Text>}
+          <Text style={styles.text}>
+            {invoice.business_entities?.name || invoice.suppliers?.company_name || 'N/A'}
+          </Text>
+          {(invoice.business_entities?.address || invoice.suppliers?.address) && (
+            <Text style={styles.text}>
+              {invoice.business_entities?.address || invoice.suppliers?.address}
+            </Text>
+          )}
+          {(invoice.business_entities?.phone || invoice.suppliers?.phone) && (
+            <Text style={styles.text}>
+              Phone: {invoice.business_entities?.phone || invoice.suppliers?.phone}
+            </Text>
+          )}
+          {(invoice.business_entities?.email || invoice.suppliers?.email) && (
+            <Text style={styles.text}>
+              Email: {invoice.business_entities?.email || invoice.suppliers?.email}
+            </Text>
+          )}
+          {(invoice.business_entities?.gstin || invoice.suppliers?.gstin) && (
+            <Text style={styles.text}>
+              GSTIN: {invoice.business_entities?.gstin || invoice.suppliers?.gstin}
+            </Text>
+          )}
           
           <Text style={[styles.text, { marginTop: 10 }]}>
             <Text style={styles.label}>Invoice Date: </Text>

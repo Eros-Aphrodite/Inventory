@@ -174,6 +174,8 @@ export const InvoiceManager = () => {
   }]);
   const [companyState, setCompanyState] = useState('27'); // Default to Maharashtra
   const [forceIGST, setForceIGST] = useState(false); // Manual IGST selection override
+  const [applyTaxOnSubtotal, setApplyTaxOnSubtotal] = useState(false); // Apply tax on subtotal instead of line items
+  const [subtotalTaxRate, setSubtotalTaxRate] = useState(18); // Tax rate for subtotal
   const [productSearch, setProductSearch] = useState("");
   const [showAddProductDialog, setShowAddProductDialog] = useState(false);
   const [pendingProductItem, setPendingProductItem] = useState<{
@@ -472,27 +474,52 @@ export const InvoiceManager = () => {
     let sgst = 0;
     let igst = 0;
 
+    // Calculate subtotal from line items
     lineItems.forEach(item => {
       const lineTotal = item.quantity * item.unit_price;
       subtotal += lineTotal;
-      
-      // Calculate GST based on forceIGST flag or state difference
+    });
+
+    // Calculate tax based on whether tax is applied on subtotal or individual items
+    if (applyTaxOnSubtotal) {
+      // Apply tax on subtotal
       const entityState = formData.entity_id ? 
         (businessEntities.find(e => e.id === formData.entity_id)?.state || '27') : '27';
       const isInterState = forceIGST || (entityState !== companyState && entityState && companyState);
       
-      const gstAmount = (lineTotal * item.gst_rate) / 100;
-      taxAmount += gstAmount;
+      taxAmount = (subtotal * subtotalTaxRate) / 100;
       
       if (isInterState) {
         // Inter-state: full tax is IGST
-        igst += gstAmount;
+        igst = taxAmount;
       } else {
         // Intra-state: split between CGST and SGST
-        cgst += gstAmount / 2;
-        sgst += gstAmount / 2;
+        cgst = taxAmount / 2;
+        sgst = taxAmount / 2;
       }
-    });
+    } else {
+      // Apply tax on individual line items (original behavior)
+      lineItems.forEach(item => {
+        const lineTotal = item.quantity * item.unit_price;
+        
+        // Calculate GST based on forceIGST flag or state difference
+        const entityState = formData.entity_id ? 
+          (businessEntities.find(e => e.id === formData.entity_id)?.state || '27') : '27';
+        const isInterState = forceIGST || (entityState !== companyState && entityState && companyState);
+        
+        const gstAmount = (lineTotal * item.gst_rate) / 100;
+        taxAmount += gstAmount;
+        
+        if (isInterState) {
+          // Inter-state: full tax is IGST
+          igst += gstAmount;
+        } else {
+          // Intra-state: split between CGST and SGST
+          cgst += gstAmount / 2;
+          sgst += gstAmount / 2;
+        }
+      });
+    }
 
     return {
       subtotal,
@@ -1264,6 +1291,8 @@ export const InvoiceManager = () => {
       max_quantity: undefined
     }]);
     setForceIGST(false);
+    setApplyTaxOnSubtotal(false);
+    setSubtotalTaxRate(18);
     setShowNewEntityForm(false);
     setSelectedPO("");
     setPOItems([]);
@@ -1438,6 +1467,8 @@ export const InvoiceManager = () => {
               max_quantity: undefined
             }]);
             setForceIGST(false);
+            setApplyTaxOnSubtotal(false);
+            setSubtotalTaxRate(18);
             setShowNewEntityForm(false);
             setSelectedPO("");
             setPOItems([]);
@@ -2098,11 +2129,49 @@ export const InvoiceManager = () => {
                 ))}
               </div>
 
+              {/* Tax on Subtotal Option */}
+              <div className="flex items-center space-x-2 p-3 border rounded-md bg-muted/50">
+                <input
+                  type="checkbox"
+                  id="applyTaxOnSubtotal"
+                  checked={applyTaxOnSubtotal}
+                  onChange={(e) => setApplyTaxOnSubtotal(e.target.checked)}
+                  className="w-4 h-4 text-primary border-gray-300 rounded focus:ring-primary cursor-pointer"
+                />
+                <Label htmlFor="applyTaxOnSubtotal" className="font-normal cursor-pointer text-sm">
+                  Apply tax on subtotal (instead of individual items)
+                </Label>
+                {applyTaxOnSubtotal && (
+                  <div className="flex items-center space-x-2 ml-4">
+                    <Label htmlFor="subtotalTaxRate" className="text-sm">Tax Rate:</Label>
+                    <Input
+                      id="subtotalTaxRate"
+                      type="number"
+                      value={subtotalTaxRate}
+                      onChange={(e) => setSubtotalTaxRate(parseFloat(e.target.value) || 0)}
+                      className="w-24"
+                      placeholder="Tax %"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                    />
+                    <span className="text-sm text-muted-foreground">%</span>
+                  </div>
+                )}
+              </div>
+
               <div className="border-t pt-4">
                 <div className="flex justify-end space-y-2">
                   <div className="text-right">
                     <p>Subtotal: {formatIndianCurrency(calculateTotals().subtotal)}</p>
-                    <p>Tax: {formatIndianCurrency(calculateTotals().taxAmount)}</p>
+                    {applyTaxOnSubtotal && (
+                      <p className="text-sm text-muted-foreground">
+                        Tax ({subtotalTaxRate}%): {formatIndianCurrency(calculateTotals().taxAmount)}
+                      </p>
+                    )}
+                    {!applyTaxOnSubtotal && (
+                      <p>Tax: {formatIndianCurrency(calculateTotals().taxAmount)}</p>
+                    )}
                     <p className="font-bold">Total: {formatIndianCurrency(calculateTotals().total)}</p>
                   </div>
                 </div>
