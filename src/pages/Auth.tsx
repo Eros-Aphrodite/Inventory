@@ -26,7 +26,9 @@ import {
   ArrowRight,
   CheckCircle,
   Star,
-  Zap
+  Zap,
+  Trash2,
+  Info
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -556,15 +558,71 @@ Inventory Migrator Team
                 <div className="relative inline-block mb-6">
                   <div className="absolute -inset-3 bg-gradient-to-r from-primary via-blue-500 to-purple-500 rounded-full opacity-30 blur-2xl animate-pulse"></div>
                   <CardTitle className="text-4xl md:text-5xl font-black bg-gradient-to-r from-primary via-blue-400 to-purple-400 bg-clip-text text-transparent relative z-10 drop-shadow-lg">
-                    Get in Touch
+                    Support & Account Deletion
                   </CardTitle>
                 </div>
                 <CardDescription className="text-lg font-semibold text-foreground/70 max-w-md mx-auto">
-                  Fill out the form below and our team will contact you to help set up your business account.
+                  Contact our support team or request account deletion
                 </CardDescription>
               </CardHeader>
 
               <CardContent className="relative z-10 pb-10">
+                {/* Account Deletion Section - Prominently Featured */}
+                <div className="mb-8 p-6 rounded-xl bg-gradient-to-br from-red-500/10 via-orange-500/10 to-red-500/10 border-2 border-red-500/30">
+                  <div className="flex items-start gap-4 mb-4">
+                    <div className="bg-red-500/20 p-3 rounded-lg">
+                      <Trash2 className="h-6 w-6 text-red-400" />
+                    </div>
+                    <div className="flex-1">
+                      <h3 className="text-xl font-bold text-white mb-2 flex items-center gap-2">
+                        Request Account Deletion
+                        <span className="text-xs bg-red-500/30 text-red-200 px-2 py-1 rounded">Required by Google Play</span>
+                      </h3>
+                      <p className="text-white/80 text-sm mb-4 leading-relaxed">
+                        To request deletion of your account and all associated data, please follow these steps:
+                      </p>
+                      <ol className="list-decimal list-inside space-y-2 text-white/90 text-sm mb-4 ml-2">
+                        <li>Send an email to <a href="mailto:retailmarketingpro1.0@gmail.com?subject=Account Deletion Request" className="text-primary hover:underline font-semibold">retailmarketingpro1.0@gmail.com</a> with subject "Account Deletion Request"</li>
+                        <li>Include your registered email address and full name</li>
+                        <li>Confirm that you want to permanently delete your account</li>
+                        <li>Your request will be processed within 7-14 business days</li>
+                      </ol>
+                      <div className="flex flex-col sm:flex-row gap-3">
+                        <Button
+                          asChild
+                          variant="destructive"
+                          className="flex-1"
+                        >
+                          <a href="mailto:retailmarketingpro1.0@gmail.com?subject=Account Deletion Request&body=Please delete my account and all associated data.%0D%0A%0D%0ARegistered Email:%0D%0AFull Name:%0D%0A%0D%0AI confirm that I want to permanently delete my account.">
+                            <Mail className="h-4 w-4 mr-2" />
+                            Send Deletion Request
+                          </a>
+                        </Button>
+                        <Button
+                          onClick={() => navigate('/account-deletion')}
+                          variant="outline"
+                          className="flex-1 border-primary/50 text-primary hover:bg-primary/10"
+                        >
+                          <Info className="h-4 w-4 mr-2" />
+                          View Full Details
+                        </Button>
+                      </div>
+                      <div className="mt-4 p-3 bg-slate-800/50 rounded-lg border border-white/10">
+                        <p className="text-xs text-white/70 leading-relaxed">
+                          <strong className="text-white">What will be deleted:</strong> User profile, company information, products, invoices, purchase orders, suppliers, customers, financial records, and all associated data. Deletion is permanent and cannot be undone.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-white/10 pt-6 mb-6">
+                  <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                    <MessageSquare className="h-5 w-5 text-primary" />
+                    General Support Contact Form
+                  </h3>
+                </div>
+
                 <form onSubmit={handleContactSubmit} className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Full Name */}

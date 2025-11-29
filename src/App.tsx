@@ -12,6 +12,7 @@ import Landing from "./pages/Landing";
 import NotFound from "./pages/NotFound";
 import Policy from "./pages/Policy";
 import Terms from "./pages/Terms";
+import AccountDeletion from "./pages/AccountDeletion";
 import { PaymentRequired } from "@/components/subscription/PaymentRequired";
 
 const queryClient = new QueryClient();
@@ -67,6 +68,7 @@ const App = () => (
           <Routes>
             <Route path="/landing" element={<Landing />} />
             <Route path="/auth" element={<Auth />} />
+            <Route path="/account-deletion" element={<AccountDeletion />} />
             <Route path="/policy" element={<Policy />} />
             <Route path="/terms" element={<Terms />} />
             <Route path="/dashboard" element={
