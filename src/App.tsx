@@ -12,6 +12,8 @@ import Landing from "./pages/Landing";
 import NotFound from "./pages/NotFound";
 import Policy from "./pages/Policy";
 import Terms from "./pages/Terms";
+import Disclaimer from "./pages/Disclaimer";
+import RefundPolicy from "./pages/RefundPolicy";
 import AccountDeletion from "./pages/AccountDeletion";
 import { PaymentRequired } from "@/components/subscription/PaymentRequired";
 
@@ -71,6 +73,8 @@ const App = () => (
             <Route path="/account-deletion" element={<AccountDeletion />} />
             <Route path="/policy" element={<Policy />} />
             <Route path="/terms" element={<Terms />} />
+            <Route path="/disclaimer" element={<Disclaimer />} />
+            <Route path="/refund-policy" element={<RefundPolicy />} />
             <Route path="/dashboard" element={
               <ProtectedRoute>
                 <Index />

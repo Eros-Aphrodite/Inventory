@@ -1,6 +1,27 @@
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, FileText, AlertCircle, Copyright, Link as LinkIcon, CreditCard, Mail } from 'lucide-react';
+import { 
+  ArrowLeft, 
+  FileText, 
+  Users, 
+  Package, 
+  Shield, 
+  Database, 
+  CreditCard, 
+  AlertTriangle, 
+  MessageCircle, 
+  Ban, 
+  Copyright, 
+  XCircle, 
+  FileEdit, 
+  Scale, 
+  Mail, 
+  Globe,
+  Smartphone,
+  Cloud,
+  Lock,
+  CheckCircle
+} from 'lucide-react';
 
 const Terms = () => {
   const navigate = useNavigate();
@@ -22,10 +43,10 @@ const Terms = () => {
             <div className="bg-gradient-to-br from-primary via-blue-500 to-purple-600 p-3 rounded-xl">
               <FileText className="h-6 w-6 text-white" />
             </div>
-            <h1 className="text-4xl font-black text-white">Terms of Service</h1>
+            <h1 className="text-4xl font-black text-white">Terms & Conditions</h1>
           </div>
           <p className="text-white/70 text-lg">
-            Last updated: January 2025
+            Last Updated: December 1, 2025
           </p>
         </div>
 
@@ -34,94 +55,341 @@ const Terms = () => {
           {/* Introduction */}
           <section className="space-y-4">
             <p className="leading-relaxed">
-              We at Retail Marketing Pro (the "Business" "we" or "us" in this Privacy Policy), operator of the web site at www.retailmarketingpro.in (the "Site"), understand the importance of the privacy of users of the Site, and in particular of protecting their personal information. We have therefore put in place this Privacy Policy, in order to inform you fully of our privacy practices, and to permit you to contact us with any concerns, questions, or corrections regarding your personal information in our possession.
+              Welcome to Inventory by RetailMarketingPro ("we", "us", "our").
+            </p>
+            <p className="leading-relaxed">
+              These Terms & Conditions ("Terms") govern your access to and use of our website inventory.retailmarketingpro.in, our mobile app, and all related services ("Service").
+            </p>
+            <p className="leading-relaxed font-semibold">
+              By accessing or using our Service, you agree to these Terms.
+            </p>
+            <p className="leading-relaxed text-primary font-semibold">
+              If you do not agree, you must stop using the Service immediately.
             </p>
           </section>
 
           <div className="border-t border-white/10 pt-8"></div>
 
-          {/* General Notice */}
+          {/* Section 1: Eligibility */}
           <section className="space-y-4">
             <div className="flex items-center gap-3">
               <div className="bg-primary/20 p-2 rounded-lg">
-                <AlertCircle className="h-5 w-5 text-primary" />
+                <Users className="h-5 w-5 text-primary" />
               </div>
-              <h2 className="text-2xl font-bold text-white">General Notice</h2>
+              <h2 className="text-2xl font-bold text-white">1. Eligibility</h2>
             </div>
             <div className="pl-11 space-y-2">
+              <p className="leading-relaxed">You must:</p>
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li>Be at least 18 years old</li>
+                <li>Provide accurate business and contact details</li>
+                <li>Use the Service only for lawful business purposes</li>
+              </ul>
+            </div>
+          </section>
+
+          {/* Section 2: Description of the Service */}
+          <section className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-primary/20 p-2 rounded-lg">
+                <Package className="h-5 w-5 text-primary" />
+              </div>
+              <h2 className="text-2xl font-bold text-white">2. Description of the Service</h2>
+            </div>
+            <div className="pl-11 space-y-4">
               <p className="leading-relaxed">
-                Retail Marketing Pro strives to ensure that the information contained in this web site is accurate and reliable. However, Retail Marketing Pro and the World Wide Web (or Web Site Host) are not infallible and errors may sometimes occur. Therefore, to the fullest extent permissible pursuant to applicable law, Retail Marketing Pro disclaims any warranty of any kind, whether expressed or implied, as to any matter whatsoever relating to this web site. Retail Marketing Pro is not liable or responsible for any damages or injuries caused by use of this web site (such as viruses, omissions or misstatements). Retail Marketing Pro may revise the information, services and the resources contained in this web site from time to time and we reserve the right to make such changes without obligation to notify past, current or prospective visitors. In no event shall Retail Marketing Pro be liable for any indirect, special, incidental, or consequential damages arising out of any use of the information contained herein.
+                Inventory by RetailMarketingPro provides:
+              </p>
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li>A mobile application that stores all data locally on the user's device</li>
+                <li>A web application that stores user data on our secure cloud</li>
+                <li>Tools for managing stock, billing, customers, suppliers, and business operations</li>
+              </ul>
+              <p className="leading-relaxed mt-4">
+                We do not access or collect user business data unless the user intentionally uses the web version.
               </p>
             </div>
           </section>
 
-          {/* Copyrights Notice */}
+          {/* Section 3: User Responsibilities */}
+          <section className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-primary/20 p-2 rounded-lg">
+                <Shield className="h-5 w-5 text-primary" />
+              </div>
+              <h2 className="text-2xl font-bold text-white">3. User Responsibilities</h2>
+            </div>
+            <div className="pl-11 space-y-2">
+              <p className="leading-relaxed">
+                By using the Service, you agree to:
+              </p>
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li>Keep your login credentials confidential</li>
+                <li>Maintain accurate records in the system</li>
+                <li>Use the platform ethically and legally</li>
+                <li>Not attempt to hack, reverse-engineer, or misuse the software</li>
+                <li>Ensure your device security (passwords, antivirus, etc.)</li>
+              </ul>
+              <p className="leading-relaxed mt-4 font-semibold">
+                You are responsible for any actions taken under your account.
+              </p>
+            </div>
+          </section>
+
+          {/* Section 4: Data Storage & Ownership */}
+          <section className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-primary/20 p-2 rounded-lg">
+                <Database className="h-5 w-5 text-primary" />
+              </div>
+              <h2 className="text-2xl font-bold text-white">4. Data Storage & Ownership</h2>
+            </div>
+            <div className="pl-11 space-y-2">
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li>All mobile app data is stored on your device only.</li>
+                <li>Web data is stored securely in our cloud server.</li>
+                <li>You retain full ownership of your business data.</li>
+                <li>You may delete your data anytime through the dashboard or by emailing <a href="mailto:retailmarketingpro1.0@gmail.com" className="text-primary hover:underline">retailmarketingpro1.0@gmail.com</a>.</li>
+              </ul>
+              <p className="leading-relaxed mt-4 font-semibold text-primary">
+                We do not access, sell, or share your business data.
+              </p>
+            </div>
+          </section>
+
+          {/* Section 5: Subscription & Payments */}
+          <section className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-primary/20 p-2 rounded-lg">
+                <CreditCard className="h-5 w-5 text-primary" />
+              </div>
+              <h2 className="text-2xl font-bold text-white">5. Subscription & Payments</h2>
+            </div>
+            <div className="pl-11 space-y-2">
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li>The Service works on an annual subscription model only.</li>
+                <li>There are no monthly plans or commissions.</li>
+                <li>Access begins immediately after payment is successful.</li>
+              </ul>
+            </div>
+          </section>
+
+          {/* Section 6: Refund, Cancellation & Dispute Policy */}
+          <section className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-primary/20 p-2 rounded-lg">
+                <CreditCard className="h-5 w-5 text-primary" />
+              </div>
+              <h2 className="text-2xl font-bold text-white">6. Refund, Cancellation & Dispute Policy</h2>
+            </div>
+            <div className="pl-11 space-y-4">
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li>Refunds may involve third-party gateway fees, which are not refundable.</li>
+                <li>For any refund, chargeback, dispute, or cancellation:</li>
+              </ul>
+              <div className="p-4 bg-red-500/10 rounded-lg border border-red-500/20 mt-4">
+                <p className="leading-relaxed font-bold text-lg text-red-400 mb-2">
+                  The maximum amount a user can claim is INR 100 Only.
+                </p>
+              </div>
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li>Once access is activated, no full refund is possible.</li>
+                <li>Users agree to this limit as a condition of using the Service.</li>
+              </ul>
+            </div>
+          </section>
+
+          {/* Section 7: Limitations of Liability */}
+          <section className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-primary/20 p-2 rounded-lg">
+                <AlertTriangle className="h-5 w-5 text-primary" />
+              </div>
+              <h2 className="text-2xl font-bold text-white">7. Limitations of Liability</h2>
+            </div>
+            <div className="pl-11 space-y-2">
+              <p className="leading-relaxed">
+                To the maximum extent permitted by law:
+              </p>
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li>We are not liable for loss of data caused by user device issues, incorrect usage, or third-party failures.</li>
+                <li>We are not responsible for business losses, revenue declines, or operational impacts caused by the user's own configuration or usage.</li>
+                <li>The platform is provided "as is" and "as available".</li>
+              </ul>
+              <p className="leading-relaxed mt-4 font-semibold">
+                Our total liability is limited to INR 100, as agreed in the Refund Policy.
+              </p>
+            </div>
+          </section>
+
+          {/* Section 8: Support & Communication */}
+          <section className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-primary/20 p-2 rounded-lg">
+                <MessageCircle className="h-5 w-5 text-primary" />
+              </div>
+              <h2 className="text-2xl font-bold text-white">8. Support & Communication</h2>
+            </div>
+            <div className="pl-11 space-y-2">
+              <p className="leading-relaxed">
+                Users may contact us for:
+              </p>
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li>Technical support</li>
+                <li>Account issues</li>
+                <li>Data deletion requests</li>
+                <li>Feedback</li>
+              </ul>
+              <div className="mt-4 p-4 bg-primary/10 rounded-lg border border-primary/20">
+                <p className="leading-relaxed mb-2">
+                  <span className="font-semibold">Email:</span> <a href="mailto:retailmarketingpro1.0@gmail.com" className="text-primary hover:underline">retailmarketingpro1.0@gmail.com</a>
+                </p>
+                <p className="leading-relaxed">
+                  We strive to respond within 48–72 hours.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* Section 9: Acceptable Use Restrictions */}
+          <section className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-primary/20 p-2 rounded-lg">
+                <Ban className="h-5 w-5 text-primary" />
+              </div>
+              <h2 className="text-2xl font-bold text-white">9. Acceptable Use Restrictions</h2>
+            </div>
+            <div className="pl-11 space-y-2">
+              <p className="leading-relaxed">
+                You agree NOT to:
+              </p>
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li>Upload harmful scripts, malware, or viruses</li>
+                <li>Misuse or overload the system</li>
+                <li>Copy, clone, replicate, or redistribute our software</li>
+                <li>Use the Service to conduct illegal activities</li>
+                <li>Access other users' data</li>
+              </ul>
+              <p className="leading-relaxed mt-4 font-semibold text-red-400">
+                Violation may result in immediate termination without refund.
+              </p>
+            </div>
+          </section>
+
+          {/* Section 10: Intellectual Property */}
           <section className="space-y-4">
             <div className="flex items-center gap-3">
               <div className="bg-primary/20 p-2 rounded-lg">
                 <Copyright className="h-5 w-5 text-primary" />
               </div>
-              <h2 className="text-2xl font-bold text-white">Copyrights Notice</h2>
+              <h2 className="text-2xl font-bold text-white">10. Intellectual Property</h2>
+            </div>
+            <div className="pl-11 space-y-2">
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li>The software, design, features, brand, and UI/UX belong to RetailMarketingPro.</li>
+                <li>You receive a non-transferable, non-exclusive license to use the Service for your business only.</li>
+              </ul>
+            </div>
+          </section>
+
+          {/* Section 11: Termination */}
+          <section className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-primary/20 p-2 rounded-lg">
+                <XCircle className="h-5 w-5 text-primary" />
+              </div>
+              <h2 className="text-2xl font-bold text-white">11. Termination</h2>
             </div>
             <div className="pl-11 space-y-2">
               <p className="leading-relaxed">
-                The text and Html code contained in this web site are the exclusive property of Retail Marketing Pro. Except where otherwise noted, the text and Html code contained here may not be copied, distributed, displayed, reproduced or transmitted in any form or by any means without the prior written permission of Retail Marketing Pro.
+                We may suspend or terminate your account if:
               </p>
-              <p className="leading-relaxed">
-                Unless otherwise stated, the photographic images on http://www.retailmarketingpro.in are owned by Retail Marketing Pro, its licensors, or its third-party image partners. You may not use any of the photographic images or graphic material on http://www.retailmarketingpro.in, in whole or in part, without written permission of Retail Marketing Pro.
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li>You violate these Terms</li>
+                <li>Fraud or illegal activity is suspected</li>
+                <li>Payment fails or is disputed</li>
+              </ul>
+              <p className="leading-relaxed mt-4">
+                Upon termination, data may be deleted permanently.
               </p>
             </div>
           </section>
 
-          {/* Hyper-Links Notice */}
+          {/* Section 12: Modifications to the Terms */}
           <section className="space-y-4">
             <div className="flex items-center gap-3">
               <div className="bg-primary/20 p-2 rounded-lg">
-                <LinkIcon className="h-5 w-5 text-primary" />
+                <FileEdit className="h-5 w-5 text-primary" />
               </div>
-              <h2 className="text-2xl font-bold text-white">Hyper-Links Notice</h2>
+              <h2 className="text-2xl font-bold text-white">12. Modifications to the Terms</h2>
             </div>
             <div className="pl-11 space-y-2">
               <p className="leading-relaxed">
-                Retail Marketing Pro`s, web site may link to sites not maintained by or related to Retail Marketing Pro. Hypertext links are provided as a service to users and are not sponsored by or affiliated with this web site or Retail Marketing Pro. Retail Marketing Pro has not reviewed the sites hyper-linked to or from this web site and is not responsible for the content of any other site. These links are to be accessed at the user`s own risk. Retail Marketing Pro makes no representations or warranties about the content, completeness, or accuracy of these links or the sites hyper-linked to this web site. Furthermore, Retail Marketing Pro does not implicitly endorse third-party sites hyper-linked to this website.
+                We may update these Terms at any time.
+              </p>
+              <p className="leading-relaxed">
+                Updated versions will be posted on this page with the "Last Updated" date.
+              </p>
+              <p className="leading-relaxed">
+                Continued use of the Service means you accept the revised Terms.
+              </p>
+            </div>
+          </section>
+
+          {/* Section 13: Governing Law */}
+          <section className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-primary/20 p-2 rounded-lg">
+                <Scale className="h-5 w-5 text-primary" />
+              </div>
+              <h2 className="text-2xl font-bold text-white">13. Governing Law</h2>
+            </div>
+            <div className="pl-11 space-y-2">
+              <p className="leading-relaxed">
+                These Terms are governed by the laws of India.
+              </p>
+              <p className="leading-relaxed">
+                All disputes shall be resolved under the jurisdiction of courts located in India.
               </p>
             </div>
           </section>
 
           <div className="border-t border-white/10 pt-8"></div>
 
-          {/* Refund and Cancellation Policy */}
+          {/* Section 14: Contact Information */}
           <section className="space-y-4">
             <div className="flex items-center gap-3">
               <div className="bg-primary/20 p-2 rounded-lg">
-                <CreditCard className="h-5 w-5 text-primary" />
+                <Mail className="h-5 w-5 text-primary" />
               </div>
-              <h2 className="text-2xl font-bold text-white">Refund and Cancellation Policy</h2>
+              <h2 className="text-2xl font-bold text-white">14. Contact Information</h2>
             </div>
             <div className="pl-11">
-              <p className="leading-relaxed">
-                All refund amounts shall be credited to your account within 5-7 business days in accordance with the terms that may be stipulated by the bank which has issued the credit/debit card.
-              </p>
-            </div>
-          </section>
-
-          {/* Contact Section */}
-          <div className="border-t border-white/10 pt-8">
-            <div className="bg-primary/10 rounded-lg border border-primary/20 p-6">
-              <div className="flex items-start gap-3">
-                <Mail className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+              <div className="bg-primary/10 rounded-lg border border-primary/20 p-6 space-y-3">
                 <div>
-                  <h3 className="font-bold text-lg mb-2">Contact Us</h3>
-                  <p className="leading-relaxed mb-2">
-                    If you have any questions about these Terms of Service, please contact us:
-                  </p>
-                  <p className="leading-relaxed">
-                    Email: <a href="mailto:retailmarketingpro1.0@gmail.com" className="text-primary hover:underline">retailmarketingpro1.0@gmail.com</a>
-                  </p>
+                  <p className="font-bold text-lg mb-2">RetailMarketingPro</p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <Mail className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-white/70 mb-1">Email:</p>
+                    <a href="mailto:retailmarketingpro1.0@gmail.com" className="text-primary hover:underline">
+                      retailmarketingpro1.0@gmail.com
+                    </a>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <Globe className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-white/70 mb-1">Website:</p>
+                    <a href="https://inventory.retailmarketingpro.in" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                      inventory.retailmarketingpro.in
+                    </a>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          </section>
         </div>
       </div>
     </div>
@@ -129,6 +397,3 @@ const Terms = () => {
 };
 
 export default Terms;
-
-
-
