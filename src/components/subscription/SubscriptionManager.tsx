@@ -15,15 +15,28 @@ import {
   RefreshCw,
   IndianRupee,
   TrendingUp,
-  Mail
+  Mail,
+  X,
+  Trash2
 } from 'lucide-react';
 import { formatIndianCurrency } from '@/utils/indianBusiness';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
+import { PayUCheckout } from '@/components/subscription/PayUCheckout';
 
 interface Subscription {
   id: string;
@@ -51,10 +64,15 @@ export const SubscriptionManager = () => {
   const [userCreatedAt, setUserCreatedAt] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [renewalData, setRenewalData] = useState({
-    payment_method: 'bank_transfer',
+    payment_method: 'payu',
     transaction_id: '',
     notes: ''
   });
+  const [showPayUCheckout, setShowPayUCheckout] = useState(false);
+  const [paymentTransactionId, setPaymentTransactionId] = useState('');
+  const [pendingSubscriptionId, setPendingSubscriptionId] = useState<string | null>(null);
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [subscriptionToCancel, setSubscriptionToCancel] = useState<string | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -169,11 +187,14 @@ export const SubscriptionManager = () => {
 
       setSubscriptions(data || []);
       
-      // Find active subscription (or most recent if no active found)
-      const active = (data || []).find(s => s.status === 'active');
-      // If no active subscription, use the most recent one (for display purposes)
-      const mostRecent = data && data.length > 0 ? data[0] : null;
-      setCurrentSubscription(active || mostRecent || null);
+      // Only set currentSubscription if it's active AND paid
+      // Pending subscriptions should NOT be shown as active
+      const activePaidSubscription = (data || []).find(
+        sub => sub.status === 'active' && sub.payment_status === 'paid'
+      );
+      
+      // If no active paid subscription, set to null (will show trial period if applicable)
+      setCurrentSubscription(activePaidSubscription || null);
       
       // If no subscriptions found, log for debugging
       if (!data || data.length === 0) {
@@ -225,15 +246,70 @@ export const SubscriptionManager = () => {
   };
 
   const handleRenewal = async () => {
-    if (!user?.id || !currentSubscription) return;
+    if (!user?.id) return;
 
     try {
       const renewalAmount = 3000; // Annual renewal price
-      const currentEndDate = new Date(currentSubscription.end_date);
+      
+      // Calculate end date - use currentSubscription if available, otherwise use userCreatedAt + 11 months
+      let currentEndDate: Date;
+      if (currentSubscription) {
+        currentEndDate = new Date(currentSubscription.end_date);
+      } else if (userCreatedAt) {
+        // For trial users without subscription record, calculate from account creation + 11 months
+        currentEndDate = new Date(userCreatedAt);
+        currentEndDate.setMonth(currentEndDate.getMonth() + 11);
+      } else {
+        // Fallback to today if no dates available
+        currentEndDate = new Date();
+      }
+      
       const newEndDate = new Date(currentEndDate);
       newEndDate.setFullYear(newEndDate.getFullYear() + 1);
 
-      // Create new subscription record for renewal
+      // If PayU is selected, initiate payment gateway flow
+      if (renewalData.payment_method === 'payu') {
+        // Import payuService dynamically
+        const { payuService } = await import('@/services/payuService');
+        
+        // Generate unique transaction ID
+        const transactionId = payuService.generateTransactionId();
+        setPaymentTransactionId(transactionId);
+
+        // Create pending subscription first
+        const { data: newSubscription, error } = await supabase
+          .from('subscriptions')
+          .insert([{
+            user_id: user.id,
+            subscription_type: 'annual',
+            status: 'pending', // Set to pending until payment confirmed
+            amount_paid: renewalAmount,
+            start_date: currentEndDate.toISOString().split('T')[0],
+            end_date: newEndDate.toISOString().split('T')[0],
+            renewal_date: newEndDate.toISOString().split('T')[0],
+            payment_status: 'pending',
+            payment_method: 'payu',
+            transaction_id: transactionId,
+            notes: 'Payment pending via PayU - Redirecting to payment gateway...'
+          }])
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        // Store subscription ID in sessionStorage for callback
+        sessionStorage.setItem('pending_subscription_id', newSubscription.id);
+        sessionStorage.setItem('pending_transaction_id', transactionId);
+        setPendingSubscriptionId(newSubscription.id);
+
+        // Close dialog and show PayU checkout
+        setShowRenewalDialog(false);
+        setShowPayUCheckout(true);
+        
+        return;
+      }
+
+      // For manual payment methods (bank transfer, UPI, etc.)
       const { data: newSubscription, error } = await supabase
         .from('subscriptions')
         .insert([{
@@ -241,7 +317,7 @@ export const SubscriptionManager = () => {
           subscription_type: 'annual',
           status: 'active',
           amount_paid: renewalAmount,
-          start_date: currentSubscription.end_date,
+          start_date: currentEndDate.toISOString().split('T')[0],
           end_date: newEndDate.toISOString().split('T')[0],
           renewal_date: newEndDate.toISOString().split('T')[0],
           payment_status: renewalData.transaction_id ? 'paid' : 'pending',
@@ -254,11 +330,13 @@ export const SubscriptionManager = () => {
 
       if (error) throw error;
 
-      // Update old subscription to expired
-      await supabase
-        .from('subscriptions')
-        .update({ status: 'expired' })
-        .eq('id', currentSubscription.id);
+      // Update old subscription to expired (if it exists)
+      if (currentSubscription) {
+        await supabase
+          .from('subscriptions')
+          .update({ status: 'expired' })
+          .eq('id', currentSubscription.id);
+      }
 
       // Update profile
       await supabase
@@ -276,7 +354,7 @@ export const SubscriptionManager = () => {
 
       setShowRenewalDialog(false);
       setRenewalData({
-        payment_method: 'bank_transfer',
+        payment_method: 'payu',
         transaction_id: '',
         notes: ''
       });
@@ -290,6 +368,68 @@ export const SubscriptionManager = () => {
       toast({
         title: "Error",
         description: error.message || "Failed to renew subscription",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const handleCancelPendingSubscription = (subscriptionId: string) => {
+    setSubscriptionToCancel(subscriptionId);
+    setShowCancelDialog(true);
+  };
+
+  const confirmCancelSubscription = async () => {
+    if (!user?.id || !subscriptionToCancel) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('subscriptions')
+        .delete()
+        .eq('id', subscriptionToCancel)
+        .eq('user_id', user.id)
+        .eq('status', 'pending') // Only allow deleting pending subscriptions
+        .select();
+
+      if (error) {
+        console.error('Delete subscription error:', error);
+        throw error;
+      }
+
+      // Check if deletion was successful
+      if (!data || data.length === 0) {
+        toast({
+          title: "Error",
+          description: "Subscription not found or cannot be deleted. It may have already been deleted or is not in pending status.",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      toast({
+        title: "Success",
+        description: "Pending subscription cancelled successfully"
+      });
+
+      // Close dialog and reset state
+      setShowCancelDialog(false);
+      setSubscriptionToCancel(null);
+
+      // Refresh subscriptions list
+      await fetchSubscriptions();
+    } catch (error: any) {
+      console.error('Failed to cancel subscription:', error);
+      let errorMessage = "Failed to cancel subscription";
+      
+      // Provide more specific error messages
+      if (error.code === '42501' || error.message?.includes('permission') || error.message?.includes('policy')) {
+        errorMessage = "Permission denied. Please ensure you have the correct database permissions to delete subscriptions.";
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      toast({
+        title: "Error",
+        description: errorMessage,
         variant: "destructive"
       });
     }
@@ -599,8 +739,33 @@ export const SubscriptionManager = () => {
         </CardContent>
       </Card>
 
-      {/* Current Subscription Card */}
-      {currentSubscription ? (
+      {/* Test Payment Button - Always Visible for Testing */}
+      {!isExpired && !isExpiringSoon && (
+        <Card className="border-dashed border-primary/50">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <CreditCard className="h-4 w-4" />
+              🧪 Testing Mode - PayU Payment Gateway
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground mb-4">
+              Test the PayU payment integration without affecting your current subscription. This will create a test renewal payment.
+            </p>
+            <Button 
+              variant="outline"
+              onClick={() => setShowRenewalDialog(true)}
+              className="w-full"
+            >
+              <CreditCard className="w-4 h-4 mr-2" />
+              Test PayU Payment Gateway
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Current Subscription Card - Only show if payment is paid */}
+      {currentSubscription && currentSubscription.payment_status === 'paid' ? (
         <Card className={isExpiringSoon || isExpired ? 'border-warning' : ''}>
           <CardHeader>
             <div className="flex justify-between items-start">
@@ -706,8 +871,66 @@ export const SubscriptionManager = () => {
                     After trial expires, renewal fee is ₹3,000 annually
                   </p>
                 )}
+                
+                {/* Test Payment Button */}
+                <div className="mt-4 pt-4 border-t border-dashed">
+                  <p className="text-xs text-muted-foreground mb-2">🧪 Testing Mode:</p>
+                  <Button 
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowRenewalDialog(true)}
+                    className="w-full"
+                  >
+                    <CreditCard className="w-4 h-4 mr-2" />
+                    Test PayU Payment Gateway
+                  </Button>
+                  <p className="text-xs text-muted-foreground mt-1 text-center">
+                    This will create a test payment without affecting your current subscription
+                  </p>
+                </div>
               </div>
             )}
+          </CardContent>
+        </Card>
+      ) : currentSubscription && currentSubscription.payment_status === 'pending' ? (
+        <Card className="border-warning">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-warning">
+              <AlertCircle className="h-5 w-5" />
+              Payment Pending
+            </CardTitle>
+            <CardDescription>
+              Your subscription payment is being processed
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="bg-warning/10 border border-warning/20 rounded-lg p-4">
+              <div className="flex items-center gap-2 text-warning mb-2">
+                <Clock className="h-5 w-5" />
+                <p className="font-semibold">Payment Pending</p>
+              </div>
+              <p className="text-sm text-warning/90 mb-3">
+                Your subscription payment is pending. Please complete the payment to activate your subscription.
+              </p>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Transaction ID:</span>
+                  <span className="font-mono text-xs">{currentSubscription.transaction_id || 'N/A'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Amount:</span>
+                  <span className="font-bold">{formatIndianCurrency(currentSubscription.amount_paid)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Payment Method:</span>
+                  <span className="uppercase">{currentSubscription.payment_method || 'N/A'}</span>
+                </div>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground text-center">
+              If you have already completed the payment, please wait a few moments for it to be processed. 
+              If the issue persists, contact support at retailmarketingpro1.0@gmail.com
+            </p>
           </CardContent>
         </Card>
       ) : (
@@ -825,7 +1048,7 @@ export const SubscriptionManager = () => {
             <div className="space-y-4">
               {subscriptions.map((sub) => (
                 <div key={sub.id} className="border rounded-lg p-4">
-                  <div className="flex justify-between items-start">
+                  <div className="flex justify-between items-start gap-4">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
                         <Badge variant={getStatusColor(sub.status)}>
@@ -856,6 +1079,18 @@ export const SubscriptionManager = () => {
                         </div>
                       </div>
                     </div>
+                    {/* Cancel button for pending subscriptions */}
+                    {sub.status === 'pending' && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleCancelPendingSubscription(sub.id)}
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10 flex-shrink-0"
+                        title="Cancel pending subscription"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -884,6 +1119,7 @@ export const SubscriptionManager = () => {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="payu">PayU (Online Payment) - Recommended</SelectItem>
                   <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
                   <SelectItem value="upi">UPI</SelectItem>
                   <SelectItem value="credit_card">Credit Card</SelectItem>
@@ -893,14 +1129,30 @@ export const SubscriptionManager = () => {
                 </SelectContent>
               </Select>
             </div>
-            <div>
-              <Label>Transaction ID / Reference (Optional)</Label>
-              <Input
-                value={renewalData.transaction_id}
-                onChange={(e) => setRenewalData(prev => ({ ...prev, transaction_id: e.target.value }))}
-                placeholder="Enter transaction reference"
-              />
-            </div>
+            {renewalData.payment_method !== 'payu' && (
+              <div>
+                <Label>Transaction ID / Reference (Optional)</Label>
+                <Input
+                  value={renewalData.transaction_id}
+                  onChange={(e) => setRenewalData(prev => ({ ...prev, transaction_id: e.target.value }))}
+                  placeholder="Enter transaction reference"
+                />
+              </div>
+            )}
+            {renewalData.payment_method === 'payu' && (
+              <div className="bg-primary/10 border border-primary/20 rounded-lg p-4">
+                <div className="flex items-start gap-2">
+                  <CreditCard className="h-5 w-5 text-primary mt-0.5" />
+                  <div className="flex-1">
+                    <p className="font-semibold text-sm mb-1">Secure Online Payment</p>
+                    <p className="text-xs text-muted-foreground">
+                      You will be redirected to PayU payment gateway to complete your payment securely. 
+                      All major credit/debit cards, UPI, net banking, and wallets are accepted.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
             <div>
               <Label>Notes (Optional)</Label>
               <Textarea
@@ -920,10 +1172,19 @@ export const SubscriptionManager = () => {
                 <div className="flex justify-between">
                   <span>New End Date:</span>
                   <span>
-                    {currentSubscription 
-                      ? new Date(new Date(currentSubscription.end_date).setFullYear(new Date(currentSubscription.end_date).getFullYear() + 1)).toLocaleDateString('en-IN')
-                      : 'N/A'
-                    }
+                    {(() => {
+                      let endDate: Date;
+                      if (currentSubscription) {
+                        endDate = new Date(currentSubscription.end_date);
+                      } else if (userCreatedAt) {
+                        endDate = new Date(userCreatedAt);
+                        endDate.setMonth(endDate.getMonth() + 11); // Trial end date
+                      } else {
+                        return 'N/A';
+                      }
+                      endDate.setFullYear(endDate.getFullYear() + 1);
+                      return endDate.toLocaleDateString('en-IN');
+                    })()}
                   </span>
                 </div>
               </div>
@@ -940,6 +1201,67 @@ export const SubscriptionManager = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* PayU Checkout - Auto-redirects to PayU */}
+      {showPayUCheckout && user && paymentTransactionId && (
+        <PayUCheckout
+          amount={3000}
+          transactionId={paymentTransactionId}
+          userEmail={user.email || ''}
+          userName={user.user_metadata?.full_name || user.email?.split('@')[0] || 'User'}
+          userPhone={user.user_metadata?.phone || user.phone || '0000000000'}
+          onSuccess={() => setShowPayUCheckout(false)}
+          onFailure={() => setShowPayUCheckout(false)}
+        />
+      )}
+
+      {/* Cancel Pending Subscription Confirmation Dialog */}
+      <AlertDialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
+                <Trash2 className="h-6 w-6 text-destructive" />
+              </div>
+              <AlertDialogTitle className="text-xl">Cancel Pending Subscription</AlertDialogTitle>
+            </div>
+          </AlertDialogHeader>
+          <div className="py-4">
+            <AlertDialogDescription className="mb-4">
+              Are you sure you want to cancel this pending subscription?
+            </AlertDialogDescription>
+            <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="h-5 w-5 text-destructive mt-0.5 flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold text-destructive mb-1">
+                    This action cannot be undone
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    The pending subscription will be permanently deleted from your account. 
+                    If you've already made a payment, please contact support instead.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => {
+              setShowCancelDialog(false);
+              setSubscriptionToCancel(null);
+            }}>
+              Keep Subscription
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmCancelSubscription}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Cancel Subscription
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

@@ -15,6 +15,8 @@ import Terms from "./pages/Terms";
 import Disclaimer from "./pages/Disclaimer";
 import RefundPolicy from "./pages/RefundPolicy";
 import AccountDeletion from "./pages/AccountDeletion";
+import PaymentSuccess from "./pages/PaymentSuccess";
+import PaymentFailure from "./pages/PaymentFailure";
 import { PaymentRequired } from "@/components/subscription/PaymentRequired";
 
 const queryClient = new QueryClient();
@@ -75,6 +77,8 @@ const App = () => (
             <Route path="/terms" element={<Terms />} />
             <Route path="/disclaimer" element={<Disclaimer />} />
             <Route path="/refund-policy" element={<RefundPolicy />} />
+            <Route path="/payment-success" element={<PaymentSuccess />} />
+            <Route path="/payment-failure" element={<PaymentFailure />} />
             <Route path="/dashboard" element={
               <ProtectedRoute>
                 <Index />

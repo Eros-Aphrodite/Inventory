@@ -30,6 +30,7 @@ import {
   Twitter,
   Linkedin,
   Instagram,
+  Youtube,
   Home,
   CreditCard
 } from 'lucide-react';
@@ -559,14 +560,16 @@ const Landing = () => {
               {/* Social Media Icons */}
               <div className="flex items-center gap-3 pt-2">
                 {[
-                  { icon: Facebook, name: 'Facebook' },
-                  { icon: Twitter, name: 'Twitter' },
-                  { icon: Linkedin, name: 'LinkedIn' },
-                  { icon: Instagram, name: 'Instagram' }
+                  { icon: Facebook, name: 'Facebook', href: 'https://www.facebook.com/profile.php?id=61578900585501' },
+                  { icon: Twitter, name: 'Twitter', href: 'https://x.com/IndiaRetailPro' },
+                  { icon: Instagram, name: 'Instagram', href: 'https://www.instagram.com/indiaretailpro/' },
+                  { icon: Youtube, name: 'YouTube', href: 'https://www.youtube.com/@RetailMARKETINGPRO' }
                 ].map((social, idx) => (
                   <a
                     key={idx}
-                    href="#"
+                    href={social.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="w-10 h-10 rounded-lg bg-white/5 border border-white/10 hover:border-primary/50 hover:bg-primary/10 flex items-center justify-center transition-all duration-300 hover:scale-110 group"
                   >
                     <social.icon className="h-5 w-5 text-white/70 group-hover:text-primary transition-colors" />
@@ -644,8 +647,8 @@ const Landing = () => {
                 </li>
                 <li className="flex items-start gap-3">
                   <Phone className="h-5 w-5 text-primary mt-0.5 flex-shrink-0" />
-                  <a href="tel:+919876543210" className="text-white/70 hover:text-primary transition-colors duration-200">
-                    +91 98765 43210
+                  <a href="tel:+918910921128" className="text-white/70 hover:text-primary transition-colors duration-200">
+                    +91 8910921128
                   </a>
                 </li>
                 <li className="flex items-start gap-3">

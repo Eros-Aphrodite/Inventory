@@ -12,6 +12,16 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { Plus, Building2, Phone, Mail, MapPin, Edit, Trash2, Download, Upload } from "lucide-react";
 import { downloadReportAsCSV } from "@/utils/pdfGenerator";
 import { ERPImportManager } from "@/components/import/ERPImportManager";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface Supplier {
   id: string;
@@ -32,6 +42,8 @@ export const SuppliersManager = () => {
   const [open, setOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [supplierToDelete, setSupplierToDelete] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     company_name: "",
     contact_person: "",
@@ -116,15 +128,24 @@ export const SuppliersManager = () => {
   };
 
   const handleDelete = async (id: string) => {
+    setSupplierToDelete(id);
+    setShowDeleteDialog(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!supplierToDelete) return;
+    
     try {
       const { error } = await supabase
         .from('suppliers')
         .delete()
-        .eq('id', id);
+        .eq('id', supplierToDelete);
 
       if (error) throw error;
       toast({ title: "Success", description: "Supplier deleted successfully" });
       fetchSuppliers();
+      setShowDeleteDialog(false);
+      setSupplierToDelete(null);
     } catch (error) {
       toast({
         title: "Error",
@@ -406,6 +427,24 @@ export const SuppliersManager = () => {
           />
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Supplier</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this supplier? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

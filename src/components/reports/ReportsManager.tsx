@@ -283,31 +283,52 @@ export const ReportsManager: React.FC = () => {
             return sum + (stock * sellingPrice) + taxAmount;
           }, 0);
 
-          // Calculate closing stock: Opening Stock - Cost of Goods Sold
-          // COGS = Sum of (quantity sold * purchase price) for each product
-          const productCostMap = new Map<string, number>();
+          // Calculate closing stock: Opening Stock Value - Sales Value
+          // For each product: closing stock value = (opening stock - quantity sold) * selling price
+          let closingStockValue = 0;
           (products || []).forEach(product => {
-            if (product.id && product.purchase_price) {
-              productCostMap.set(product.id, product.purchase_price);
-            }
+            const openingStock = product.current_stock || 0;
+            const sellingPrice = product.selling_price || 0;
+            
+            // Find total quantity sold for this product
+            let quantitySold = 0;
+            (salesInvoiceItems || []).forEach(item => {
+              if (item.product_id === product.id) {
+                quantitySold += item.quantity || 0;
+              }
+            });
+            
+            // Calculate closing stock quantity
+            const closingStockQty = Math.max(0, openingStock - quantitySold);
+            
+            // Calculate closing stock value
+            closingStockValue += closingStockQty * sellingPrice;
           });
 
-          // Calculate cost of goods sold from actual invoice items
-          let costOfGoodsSold = 0;
-          (salesInvoiceItems || []).forEach(item => {
-            if (item.product_id && productCostMap.has(item.product_id)) {
-              const purchasePrice = productCostMap.get(item.product_id)!;
-              costOfGoodsSold += (item.quantity || 0) * purchasePrice;
-            }
-          });
-
-          // Calculate closing stock: Opening Stock - Cost of Goods Sold
-          const closingStock = Math.max(0, openingStockCost - costOfGoodsSold);
+          // Use closingStockValue for the report
+          const closingStock = closingStockValue;
 
           // Calculate indirect expenses (labour + transport invoices with tax)
           const labourExpenses = (labourInvoices || []).reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
           const transportExpenses = (transportInvoices || []).reduce((sum, inv) => sum + (inv.total_amount || 0), 0);
-          const indirectExpenses = labourExpenses + transportExpenses;
+          
+          // Calculate sales discounts (indirect expenses)
+          let salesDiscounts = 0;
+          (salesInvoices || []).forEach(inv => {
+            if (inv.discount_amount) {
+              salesDiscounts += inv.discount_amount;
+            }
+          });
+          
+          // Calculate purchase discounts (indirect income)
+          let purchaseDiscounts = 0;
+          (purchaseInvoices || []).forEach(inv => {
+            if (inv.discount_amount) {
+              purchaseDiscounts += inv.discount_amount;
+            }
+          });
+          
+          const indirectExpenses = labourExpenses + transportExpenses + salesDiscounts;
 
           // Fetch ledger entries for indirect income (income and expense ledgers)
           const { data: { user } } = await supabase.auth.getUser();
@@ -369,7 +390,7 @@ export const ReportsManager: React.FC = () => {
           // - bank: credit = income (deposits), debit = expense (withdrawals)
           // - receivables: credit = income (collections), debit = expense (write-offs)
           // - payables: debit = expense (payments), credit = income (reversals)
-          const indirectIncome = (ledgerEntries || []).reduce((sum, entry) => {
+          let indirectIncome = (ledgerEntries || []).reduce((sum, entry) => {
             const ledgerType = entry.ledger_type?.toLowerCase();
             const credit = entry.credit_amount || 0;
             const debit = entry.debit_amount || 0;
@@ -392,6 +413,9 @@ export const ReportsManager: React.FC = () => {
                 return sum;
             }
           }, 0);
+          
+          // Add purchase discounts to indirect income
+          indirectIncome += purchaseDiscounts;
           
           const indirectExpensesFromLedgers = (ledgerEntries || []).reduce((sum, entry) => {
             const ledgerType = entry.ledger_type?.toLowerCase();
@@ -447,9 +471,12 @@ export const ReportsManager: React.FC = () => {
             { subcategory: '', amount: grossProfit, category: 'Gross Profit' },
             { subcategory: 'Labour Invoices (with Tax)', amount: labourExpenses, category: 'Indirect Expenses' },
             { subcategory: 'Transport Invoices (with Tax)', amount: transportExpenses, category: 'Indirect Expenses' },
+            { subcategory: 'Sales Discounts', amount: salesDiscounts, category: 'Indirect Expenses' },
             { subcategory: 'Indirect Expenses (Ledger)', amount: indirectExpensesFromLedgers, category: 'Indirect Expenses' },
             { subcategory: 'Total Indirect Expenses', amount: totalIndirectExpenses, category: 'Indirect Expenses' },
-            { subcategory: 'Indirect Income (Ledger)', amount: indirectIncome, category: 'Indirect Income' },
+            { subcategory: 'Purchase Discounts', amount: purchaseDiscounts, category: 'Indirect Income' },
+            { subcategory: 'Indirect Income (Ledger)', amount: indirectIncome - purchaseDiscounts, category: 'Indirect Income' },
+            { subcategory: 'Total Indirect Income', amount: indirectIncome, category: 'Indirect Income' },
             { subcategory: 'Net Sales Tax Collected', amount: netSalesTax, category: 'Taxes' },
             { subcategory: 'Net Purchase Tax Paid', amount: netPurchaseTax, category: 'Taxes' },
             { subcategory: 'Total Inventory Selling Price (with Tax)', amount: totalInventorySellingWithTax, category: 'Net Profit' },

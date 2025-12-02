@@ -48,12 +48,14 @@ export const useSubscription = () => {
       // First, run the expiry check function to update expired subscriptions
       await supabase.rpc('check_subscription_expiry');
 
-      // Get user's active subscription
+      // Get user's active subscription (must be active AND paid)
+      // Pending subscriptions should NOT grant access
       const { data: subscriptions, error } = await supabase
         .from('subscriptions')
         .select('*')
         .eq('user_id', user.id)
         .eq('status', 'active')
+        .eq('payment_status', 'paid')  // Only show paid subscriptions as active
         .order('end_date', { ascending: false })
         .limit(1);
       

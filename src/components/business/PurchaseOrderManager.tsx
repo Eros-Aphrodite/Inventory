@@ -17,6 +17,16 @@ import { downloadReportAsCSV } from "@/utils/pdfGenerator";
 import { POReceivingManager } from "./POReceivingManager";
 import { POPDF } from "@/components/pdf/POPDF";
 import { pdf } from "@react-pdf/renderer";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
  
 
 interface PurchaseOrder {
@@ -94,6 +104,8 @@ export const PurchaseOrderManager = () => {
   const [receivingItems, setReceivingItems] = useState<{[key: string]: number}>({});
   const [showReceivingModal, setShowReceivingModal] = useState(false);
   const [showNewReceivingManager, setShowNewReceivingManager] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [poToDelete, setPoToDelete] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     supplier_id: "",
     order_date: new Date().toISOString().split('T')[0],
@@ -586,15 +598,24 @@ export const PurchaseOrderManager = () => {
   };
 
   const handleDelete = async (id: string) => {
+    setPoToDelete(id);
+    setShowDeleteDialog(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!poToDelete) return;
+    
     try {
       const { error } = await supabase
         .from('purchase_orders')
         .delete()
-        .eq('id', id);
+        .eq('id', poToDelete);
 
       if (error) throw error;
       toast({ title: "Success", description: "Purchase order deleted successfully" });
       fetchPurchaseOrders();
+      setShowDeleteDialog(false);
+      setPoToDelete(null);
     } catch (error) {
       toast({
         title: "Error",
@@ -1150,9 +1171,28 @@ export const PurchaseOrderManager = () => {
                         type="number"
                         placeholder="Qty"
                         value={item.quantity}
-                        onChange={(e) => updateLineItem(index, 'quantity', parseFloat(e.target.value) || 0)}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          // Only allow whole numbers
+                          if (value === '' || /^\d+$/.test(value)) {
+                            updateLineItem(index, 'quantity', value === '' ? 0 : parseInt(value, 10));
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          // Prevent decimal point, minus, and 'e' key
+                          if (e.key === '.' || e.key === '-' || e.key === 'e' || e.key === 'E') {
+                            e.preventDefault();
+                          }
+                          // Handle arrow keys - allow but prevent decimal input
+                          if (['ArrowUp', 'ArrowDown'].includes(e.key)) {
+                            e.preventDefault();
+                            const currentValue = parseInt(String(item.quantity), 10) || 0;
+                            const newValue = e.key === 'ArrowUp' ? currentValue + 1 : Math.max(0, currentValue - 1);
+                            updateLineItem(index, 'quantity', newValue);
+                          }
+                        }}
                         min="0"
-                        step="0.01"
+                        step="1"
                         required
                       />
                     </div>
@@ -1617,6 +1657,24 @@ export const PurchaseOrderManager = () => {
           }}
         />
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Purchase Order</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this purchase order? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

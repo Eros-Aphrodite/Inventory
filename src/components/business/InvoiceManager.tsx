@@ -17,6 +17,16 @@ import { downloadInvoiceAsCSV } from "@/utils/pdfGenerator";
 import { InvoicePDF } from "@/components/pdf/InvoicePDF";
 import { pdf } from "@react-pdf/renderer";
 import { GSTSyncService } from "@/services/gstSyncService";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface Invoice {
   id: string;
@@ -32,6 +42,8 @@ interface Invoice {
   subtotal: number;
   tax_amount: number;
   total_amount: number;
+  discount_amount?: number;
+  discount_percentage?: number;
   status: string;
   notes: string | null;
   total_paid?: number;
@@ -146,7 +158,9 @@ export const InvoiceManager = () => {
     payment_status: "due" as string,
     invoice_date: new Date().toISOString().split('T')[0],
     due_date: "",
-    notes: ""
+    notes: "",
+    discount_amount: 0,
+    discount_percentage: 0
   });
   const [newEntityData, setNewEntityData] = useState({
     name: "",
@@ -177,6 +191,8 @@ export const InvoiceManager = () => {
   const [applyTaxOnSubtotal, setApplyTaxOnSubtotal] = useState(false); // Apply tax on subtotal instead of line items
   const [subtotalTaxRate, setSubtotalTaxRate] = useState(18); // Tax rate for subtotal
   const [productSearch, setProductSearch] = useState("");
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [invoiceToDelete, setInvoiceToDelete] = useState<string | null>(null);
   const [showAddProductDialog, setShowAddProductDialog] = useState(false);
   const [pendingProductItem, setPendingProductItem] = useState<{
     index: number;
@@ -480,14 +496,24 @@ export const InvoiceManager = () => {
       subtotal += lineTotal;
     });
 
+    // Apply discount
+    let discountAmount = 0;
+    if (formData.discount_percentage > 0) {
+      discountAmount = (subtotal * formData.discount_percentage) / 100;
+    } else if (formData.discount_amount > 0) {
+      discountAmount = formData.discount_amount;
+    }
+    
+    const subtotalAfterDiscount = Math.max(0, subtotal - discountAmount);
+
     // Calculate tax based on whether tax is applied on subtotal or individual items
     if (applyTaxOnSubtotal) {
-      // Apply tax on subtotal
+      // Apply tax on subtotal after discount
       const entityState = formData.entity_id ? 
         (businessEntities.find(e => e.id === formData.entity_id)?.state || '27') : '27';
       const isInterState = forceIGST || (entityState !== companyState && entityState && companyState);
       
-      taxAmount = (subtotal * subtotalTaxRate) / 100;
+      taxAmount = (subtotalAfterDiscount * subtotalTaxRate) / 100;
       
       if (isInterState) {
         // Inter-state: full tax is IGST
@@ -523,8 +549,10 @@ export const InvoiceManager = () => {
 
     return {
       subtotal,
+      discountAmount,
+      subtotalAfterDiscount,
       taxAmount,
-      total: subtotal + taxAmount,
+      total: subtotalAfterDiscount + taxAmount,
       cgst,
       sgst,
       igst
@@ -707,6 +735,8 @@ export const InvoiceManager = () => {
                 subtotal: totals.subtotal,
                 tax_amount: totals.taxAmount,
                 total_amount: totals.total,
+                discount_amount: formData.discount_amount || 0,
+                discount_percentage: formData.discount_percentage || 0,
                 notes: formData.notes || null,
                 user_id: user.id,
                 company_id: selectedCompany.company_name
@@ -982,15 +1012,24 @@ export const InvoiceManager = () => {
   };
 
   const handleDelete = async (id: string) => {
+    setInvoiceToDelete(id);
+    setShowDeleteDialog(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!invoiceToDelete) return;
+    
     try {
       const { error } = await supabase
         .from('invoices')
         .delete()
-        .eq('id', id);
+        .eq('id', invoiceToDelete);
 
       if (error) throw error;
       toast({ title: "Success", description: "Invoice deleted successfully" });
       fetchInvoices();
+      setShowDeleteDialog(false);
+      setInvoiceToDelete(null);
     } catch (error) {
       toast({
         title: "Error",
@@ -1280,7 +1319,9 @@ export const InvoiceManager = () => {
       payment_status: "due",
       invoice_date: new Date().toISOString().split('T')[0],
       due_date: "",
-      notes: ""
+      notes: "",
+      discount_amount: 0,
+      discount_percentage: 0
     });
     setLineItems([{
       product_id: undefined,
@@ -1880,7 +1921,15 @@ export const InvoiceManager = () => {
                     {/* Product selection - Show for all invoice types, but optional for non-customer */}
                     <div className="col-span-3">
                         <Label className="text-sm mb-1 block">Product</Label>
-                        <div className="flex gap-2">
+                        <div className="space-y-2">
+                          {/* Search Input */}
+                          <Input
+                            placeholder="Search products or select Manual Entry..."
+                            value={productSearch}
+                            onChange={(e) => setProductSearch(e.target.value)}
+                            className="mb-2"
+                          />
+                          
                           <Select 
                             value={item.product_id || "__manual__"}
                             disabled={products.length === 0}
@@ -1967,11 +2016,13 @@ export const InvoiceManager = () => {
                               filteredProducts = filteredProducts.filter(p => {
                                 const name = p.name?.toLowerCase() || '';
                                 const desc = p.description?.toLowerCase() || '';
+                                const sku = p.sku?.toLowerCase() || '';
                                 const stock = String(p.current_stock || 0);
                                 const price = p.selling_price ? String(p.selling_price) : '';
                                 const hsn = p.hsn_code?.toLowerCase() || '';
                                 return name.includes(searchTerm) || 
                                        desc.includes(searchTerm) ||
+                                       sku.includes(searchTerm) ||
                                        stock.includes(searchTerm) || 
                                        price.includes(searchTerm) ||
                                        hsn.includes(searchTerm);
@@ -2160,10 +2211,58 @@ export const InvoiceManager = () => {
                 )}
               </div>
 
+              {/* Discount Fields */}
+              <div className="grid grid-cols-2 gap-4 mb-4 border-t pt-4">
+                <div>
+                  <Label htmlFor="discount-amount">Discount Amount (₹)</Label>
+                  <Input
+                    id="discount-amount"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={formData.discount_amount}
+                    onChange={(e) => {
+                      const amount = parseFloat(e.target.value) || 0;
+                      const totals = calculateTotals();
+                      setFormData(prev => ({
+                        ...prev,
+                        discount_amount: amount,
+                        discount_percentage: totals.subtotal > 0 ? (amount / totals.subtotal) * 100 : 0
+                      }));
+                    }}
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="discount-percentage">Discount Percentage (%)</Label>
+                  <Input
+                    id="discount-percentage"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    max="100"
+                    value={formData.discount_percentage}
+                    onChange={(e) => {
+                      const percentage = parseFloat(e.target.value) || 0;
+                      const totals = calculateTotals();
+                      setFormData(prev => ({
+                        ...prev,
+                        discount_percentage: percentage,
+                        discount_amount: (totals.subtotal * percentage) / 100
+                      }));
+                    }}
+                  />
+                </div>
+              </div>
+
               <div className="border-t pt-4">
                 <div className="flex justify-end space-y-2">
                   <div className="text-right">
                     <p>Subtotal: {formatIndianCurrency(calculateTotals().subtotal)}</p>
+                    {calculateTotals().discountAmount > 0 && (
+                      <p className="text-sm text-green-600">
+                        Discount ({formData.discount_percentage > 0 ? `${formData.discount_percentage.toFixed(2)}%` : 'Amount'}): -{formatIndianCurrency(calculateTotals().discountAmount)}
+                      </p>
+                    )}
                     {applyTaxOnSubtotal && (
                       <p className="text-sm text-muted-foreground">
                         Tax ({subtotalTaxRate}%): {formatIndianCurrency(calculateTotals().taxAmount)}
@@ -2652,6 +2751,24 @@ export const InvoiceManager = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Invoice</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this invoice? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
