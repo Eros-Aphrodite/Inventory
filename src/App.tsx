@@ -14,6 +14,7 @@ import Policy from "./pages/Policy";
 import Terms from "./pages/Terms";
 import Disclaimer from "./pages/Disclaimer";
 import RefundPolicy from "./pages/RefundPolicy";
+import CookieNotice from "./pages/CookieNotice";
 import AccountDeletion from "./pages/AccountDeletion";
 import PaymentSuccess from "./pages/PaymentSuccess";
 import PaymentFailure from "./pages/PaymentFailure";
@@ -77,6 +78,7 @@ const App = () => (
             <Route path="/terms" element={<Terms />} />
             <Route path="/disclaimer" element={<Disclaimer />} />
             <Route path="/refund-policy" element={<RefundPolicy />} />
+            <Route path="/cookie-notice" element={<CookieNotice />} />
             <Route path="/payment-success" element={<PaymentSuccess />} />
             <Route path="/payment-failure" element={<PaymentFailure />} />
             <Route path="/dashboard" element={

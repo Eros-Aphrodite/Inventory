@@ -677,6 +677,9 @@ const Landing = () => {
               <a href="/refund-policy" className="text-white/60 hover:text-primary text-sm transition-colors duration-200">
                 Refund Policy
               </a>
+              <a href="/cookie-notice" className="text-white/60 hover:text-primary text-sm transition-colors duration-200">
+                Cookie Notice
+              </a>
             </div>
           </div>
         </div>
