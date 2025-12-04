@@ -84,6 +84,7 @@ interface BusinessEntity {
   email?: string;
   address?: string;
   gstin?: string;
+  state?: string;
   created_at?: string;
 }
 
@@ -96,6 +97,7 @@ interface Product {
   gst_rate: number;
   current_stock?: number;
   min_stock_level?: number | null;
+  sku?: string | null;
 }
 
 interface PurchaseOrder {
@@ -108,6 +110,7 @@ interface PurchaseOrder {
   tax_amount: number;
   total_amount: number;
   status: string;
+  created_at?: string;
   suppliers?: {
     company_name: string;
   };
@@ -214,13 +217,13 @@ export const InvoiceManager = () => {
   const fetchInvoicePayments = useCallback(async (invoiceId: string) => {
     try {
       const { data, error } = await supabase
-        .from('invoice_payments')
+        .from('invoice_payments' as any)
         .select('*')
         .eq('invoice_id', invoiceId)
         .order('payment_date', { ascending: false });
 
       if (error) throw error;
-      setInvoicePayments(data || []);
+      setInvoicePayments((data || []) as unknown as InvoicePayment[]);
     } catch (error) {
       console.error('Failed to load payments:', error);
       setInvoicePayments([]);
@@ -248,7 +251,7 @@ export const InvoiceManager = () => {
 
   const fetchInvoices = async () => {
     try {
-      let query = supabase
+      let query: any = supabase
         .from('invoices')
         .select(`
           *,
@@ -362,7 +365,7 @@ export const InvoiceManager = () => {
 
   const fetchProducts = async () => {
     try {
-      let query = supabase
+      let query: any = supabase
         .from('products')
         .select('id, name, description, selling_price, gst_rate, current_stock, min_stock_level, hsn_code');
 
@@ -397,7 +400,7 @@ export const InvoiceManager = () => {
 
   const fetchPurchaseOrders = async (invoiceType?: string) => {
     try {
-      let query = supabase
+      let query: any = supabase
         .from('purchase_orders')
         .select(`
           *,
@@ -833,7 +836,7 @@ export const InvoiceManager = () => {
             // Only update inventory if we found a product (by ID or name)
             if (productId) {
               // Fetch current stock with product name for better error messages
-              let query = supabase
+              let query: any = supabase
                 .from('products')
                 .select('current_stock, name')
                 .eq('id', productId);
@@ -881,7 +884,7 @@ export const InvoiceManager = () => {
               }
               
               // Update inventory
-              let updateQuery = supabase
+              let updateQuery: any = supabase
                 .from('products')
                 .update({ current_stock: newStock })
                 .eq('id', productId);
@@ -957,12 +960,12 @@ export const InvoiceManager = () => {
             invoice_number: invoiceNumber,
             invoice_date: formData.invoice_date,
             transaction_type: gstTransactionType,
-            entity_name: entityDetails?.company_name || entityDetails?.name || (formData.entity_type === 'other' ? 'Miscellaneous' : 'Unknown'),
+            entity_name: (entityDetails as any)?.company_name || (entityDetails as any)?.name || (formData.entity_type === 'other' ? 'Miscellaneous' : 'Unknown'),
             entity_id: formData.entity_id || '',
             subtotal: totals.subtotalAfterDiscount, // Use subtotal after discount for GST calculation
             tax_amount: totals.taxAmount,
             total_amount: totals.total,
-            from_state: entityDetails?.state || '27',
+            from_state: (entityDetails as any)?.state || '27',
             to_state: companyState,
             forceIGST: forceIGST, // Pass the forceIGST flag
             line_items: lineItems.map(item => ({
@@ -1183,7 +1186,7 @@ export const InvoiceManager = () => {
 
       // Record the payment
       const { error: paymentError } = await supabase
-        .from('invoice_payments')
+        .from('invoice_payments' as any)
         .insert([{
           invoice_id: selectedInvoice.id,
           amount: paymentData.amount,
@@ -1386,6 +1389,7 @@ export const InvoiceManager = () => {
       const productNameLower = productName.toLowerCase();
 
       // Check for duplicate product name
+      // @ts-expect-error - TypeScript has issues with deep type inference on Supabase queries
       const { data: existingProducts, error: checkError } = await supabase
         .from('products')
         .select('id, name')
@@ -1502,7 +1506,9 @@ export const InvoiceManager = () => {
               payment_status: "due",
               invoice_date: new Date().toISOString().split('T')[0],
               due_date: "",
-              notes: ""
+              notes: "",
+              discount_amount: 0,
+              discount_percentage: 0
             });
             setLineItems([{
               product_id: undefined,
