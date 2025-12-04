@@ -303,7 +303,7 @@ const Landing = () => {
                 className="relative overflow-hidden group bg-gradient-to-r from-primary via-blue-500 to-purple-600 hover:from-primary/90 hover:via-blue-600 hover:to-purple-700 text-white text-lg px-10 py-8 h-auto shadow-2xl hover:shadow-primary/50 transition-all duration-500 font-bold hover:scale-105"
               >
                 <span className="relative z-10 flex items-center gap-3">
-                  Start Free Trial
+                  Support
                   <Rocket className="h-6 w-6 group-hover:translate-x-2 group-hover:-translate-y-1 transition-all" />
                 </span>
                 <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-1000"></span>
