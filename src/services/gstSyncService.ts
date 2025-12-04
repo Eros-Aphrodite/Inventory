@@ -154,6 +154,85 @@ export class GSTSyncService {
   }
 
   /**
+   * Update GST entry amounts when invoice is edited/modified
+   */
+  static async updateGSTEntryAmounts(
+    invoiceId: string,
+    invoiceData: InvoiceGSTData
+  ): Promise<GSTSyncResult> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        return { success: false, error: 'User not authenticated' };
+      }
+
+      // Find existing GST entry
+      const { data: existingGST, error: findError } = await supabase
+        .from('gst_entries')
+        .select('id')
+        .eq('invoice_id', invoiceId)
+        .single();
+
+      if (findError || !existingGST) {
+        // If no entry exists, create one
+        return await this.createGSTEntryFromInvoice(invoiceData);
+      }
+
+      // Recalculate GST breakdown
+      const isInterState = invoiceData.forceIGST || 
+        (invoiceData.from_state !== invoiceData.to_state && 
+         invoiceData.from_state && invoiceData.to_state);
+      
+      const gstConfig: GSTConfig = {
+        fromState: invoiceData.from_state,
+        toState: invoiceData.to_state,
+        isInterState: isInterState
+      };
+
+      const breakdown = calculateGSTBreakdown(
+        invoiceData.subtotal,
+        this.calculateAverageGSTRate(invoiceData.line_items),
+        gstConfig
+      );
+
+      const isReturn = invoiceData.transaction_type === 'sale_return' || 
+                       invoiceData.transaction_type === 'purchase_return';
+      const multiplier = isReturn ? -1 : 1;
+
+      // Update GST entry
+      const { error: updateError } = await supabase
+        .from('gst_entries')
+        .update({
+          transaction_type: invoiceData.transaction_type,
+          entity_name: invoiceData.entity_name,
+          invoice_number: invoiceData.invoice_number,
+          invoice_date: invoiceData.invoice_date,
+          taxable_amount: breakdown.taxableAmount * multiplier,
+          gst_rate: this.calculateAverageGSTRate(invoiceData.line_items),
+          cgst: breakdown.cgst * multiplier,
+          sgst: breakdown.sgst * multiplier,
+          igst: breakdown.igst * multiplier,
+          total_gst: breakdown.totalGST * multiplier,
+          total_amount: breakdown.totalAmount * multiplier,
+          from_state: invoiceData.from_state,
+          to_state: invoiceData.to_state,
+          is_interstate: gstConfig.isInterState
+        })
+        .eq('id', existingGST.id);
+
+      if (updateError) throw updateError;
+
+      return { success: true };
+    } catch (error) {
+      console.error('Error updating GST entry amounts:', error);
+      return { 
+        success: false, 
+        error: error instanceof Error ? error.message : 'Unknown error' 
+      };
+    }
+  }
+
+  /**
    * Delete GST entry when invoice is deleted
    */
   static async deleteGSTEntryFromInvoice(invoiceId: string): Promise<GSTSyncResult> {

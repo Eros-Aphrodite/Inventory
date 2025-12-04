@@ -496,12 +496,17 @@ export const InvoiceManager = () => {
       subtotal += lineTotal;
     });
 
-    // Apply discount
+    // Apply discount - allow both flat rate and percentage to work together
     let discountAmount = 0;
-    if (formData.discount_percentage > 0) {
-      discountAmount = (subtotal * formData.discount_percentage) / 100;
-    } else if (formData.discount_amount > 0) {
+    // First apply flat discount amount
+    if (formData.discount_amount > 0) {
       discountAmount = formData.discount_amount;
+    }
+    // Then apply percentage discount on the remaining amount after flat discount
+    if (formData.discount_percentage > 0) {
+      const remainingAfterFlat = subtotal - discountAmount;
+      const percentageDiscount = (remainingAfterFlat * formData.discount_percentage) / 100;
+      discountAmount += percentageDiscount;
     }
     
     const subtotalAfterDiscount = Math.max(0, subtotal - discountAmount);
@@ -954,7 +959,7 @@ export const InvoiceManager = () => {
             transaction_type: gstTransactionType,
             entity_name: entityDetails?.company_name || entityDetails?.name || (formData.entity_type === 'other' ? 'Miscellaneous' : 'Unknown'),
             entity_id: formData.entity_id || '',
-            subtotal: totals.subtotal,
+            subtotal: totals.subtotalAfterDiscount, // Use subtotal after discount for GST calculation
             tax_amount: totals.taxAmount,
             total_amount: totals.total,
             from_state: entityDetails?.state || '27',
@@ -2223,11 +2228,10 @@ export const InvoiceManager = () => {
                     value={formData.discount_amount}
                     onChange={(e) => {
                       const amount = parseFloat(e.target.value) || 0;
-                      const totals = calculateTotals();
                       setFormData(prev => ({
                         ...prev,
-                        discount_amount: amount,
-                        discount_percentage: totals.subtotal > 0 ? (amount / totals.subtotal) * 100 : 0
+                        discount_amount: amount
+                        // Allow both flat and percentage to work independently
                       }));
                     }}
                   />
@@ -2243,11 +2247,10 @@ export const InvoiceManager = () => {
                     value={formData.discount_percentage}
                     onChange={(e) => {
                       const percentage = parseFloat(e.target.value) || 0;
-                      const totals = calculateTotals();
                       setFormData(prev => ({
                         ...prev,
-                        discount_percentage: percentage,
-                        discount_amount: (totals.subtotal * percentage) / 100
+                        discount_percentage: percentage
+                        // Allow both flat and percentage to work independently
                       }));
                     }}
                   />
@@ -2260,7 +2263,11 @@ export const InvoiceManager = () => {
                     <p>Subtotal: {formatIndianCurrency(calculateTotals().subtotal)}</p>
                     {calculateTotals().discountAmount > 0 && (
                       <p className="text-sm text-green-600">
-                        Discount ({formData.discount_percentage > 0 ? `${formData.discount_percentage.toFixed(2)}%` : 'Amount'}): -{formatIndianCurrency(calculateTotals().discountAmount)}
+                        Discount {formData.discount_amount > 0 && formData.discount_percentage > 0 
+                          ? `(₹${formatIndianCurrency(formData.discount_amount)} + ${formData.discount_percentage.toFixed(2)}%)`
+                          : formData.discount_percentage > 0 
+                          ? `(${formData.discount_percentage.toFixed(2)}%)`
+                          : '(Amount)'}: -{formatIndianCurrency(calculateTotals().discountAmount)}
                       </p>
                     )}
                     {applyTaxOnSubtotal && (

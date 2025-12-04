@@ -164,7 +164,7 @@ export const ReportsManager: React.FC = () => {
           // Fetch all sales invoices (for sales account)
           const { data: allSalesInvoices, error: salesError } = await supabase
             .from('invoices')
-            .select('id, subtotal, tax_amount, total_amount, invoice_date')
+            .select('id, subtotal, tax_amount, total_amount, invoice_date, discount_amount')
             .eq('company_id', selectedCompany.company_name)
             .eq('invoice_type', 'sales')
             .gte('invoice_date', dateFrom)
@@ -186,7 +186,7 @@ export const ReportsManager: React.FC = () => {
           // Fetch purchase invoices
           const { data: purchaseInvoices, error: purchaseError } = await supabase
             .from('invoices')
-            .select('subtotal, tax_amount, total_amount, invoice_date')
+            .select('subtotal, tax_amount, total_amount, invoice_date, discount_amount')
             .eq('company_id', selectedCompany.company_name)
             .eq('invoice_type', 'purchase')
             .gte('invoice_date', dateFrom)
@@ -314,7 +314,7 @@ export const ReportsManager: React.FC = () => {
           
           // Calculate sales discounts (indirect expenses)
           let salesDiscounts = 0;
-          (salesInvoices || []).forEach(inv => {
+          (allSalesInvoices || []).forEach(inv => {
             if (inv.discount_amount) {
               salesDiscounts += inv.discount_amount;
             }
