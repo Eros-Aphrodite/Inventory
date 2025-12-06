@@ -33,7 +33,15 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 
 // Lazy load components for better performance
-const ImportModal = lazy(() => import("@/components/inventory/ImportModal").then(m => ({ default: m.ImportModal })));
+const ImportModal = lazy(() => 
+  import("@/components/inventory/ImportModal")
+    .then(m => ({ default: m.ImportModal }))
+    .catch((error) => {
+      console.error('Failed to load ImportModal:', error);
+      // Return a fallback component
+      return { default: () => <div>Failed to load import modal. Please refresh the page.</div> };
+    })
+);
 const GSTCalculator = lazy(() => import("@/components/inventory/GSTCalculator").then(m => ({ default: m.GSTCalculator })));
 const GSTTracker = lazy(() => import("@/components/gst/GSTTracker").then(m => ({ default: m.GSTTracker })));
 const LedgerManager = lazy(() => import("@/components/ledger/LedgerManager").then(m => ({ default: m.LedgerManager })));
@@ -123,14 +131,22 @@ const Index = () => {
 
       if (data?.business_entities && Array.isArray(data.business_entities) && data.business_entities.length > 0) {
         // Convert business_entities to companies format
-        const companiesList = data.business_entities.map((entity: any, index: number) => ({
-          id: index + 1,
-          company_name: entity.company_name || entity.name || "Untitled Company",
-          ...entity
-        }));
-        setCompanies(companiesList);
-        // Restore previously selected company for this user
-        restoreSelectedCompany(user.id, companiesList);
+        // Filter out any entities with null/undefined company_name or name
+        const companiesList = data.business_entities
+          .filter((entity: any) => entity && (entity.company_name || entity.name))
+          .map((entity: any, index: number) => ({
+            id: index + 1,
+            company_name: entity.company_name || entity.name || "Untitled Company",
+            ...entity
+          }));
+        
+        if (companiesList.length > 0) {
+          setCompanies(companiesList);
+          // Restore previously selected company for this user
+          restoreSelectedCompany(user.id, companiesList);
+        } else {
+          setCompanies([]);
+        }
       } else {
         setCompanies([]);
       }
@@ -414,14 +430,16 @@ const Index = () => {
       </header>
 
       {/* Import Modal */}
-      <Suspense fallback={<div className="fixed inset-0 bg-black/50 flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>}>
-        <ImportModal
-          isOpen={showImportModal}
-          onClose={() => setShowImportModal(false)}
-          selectedCompany={selectedCompany}
-          onImportComplete={handleImportComplete}
-        />
-      </Suspense>
+      {showImportModal && (
+        <Suspense fallback={<div className="fixed inset-0 bg-black/50 flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>}>
+          <ImportModal
+            isOpen={showImportModal}
+            onClose={() => setShowImportModal(false)}
+            selectedCompany={selectedCompany}
+            onImportComplete={handleImportComplete}
+          />
+        </Suspense>
+      )}
 
       {/* Delete Company Confirmation Dialog */}
       <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>

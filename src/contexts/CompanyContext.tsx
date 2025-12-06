@@ -44,7 +44,7 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
     if (storedCompanyName) {
       // Find the company by name (case-insensitive)
       const company = companiesList.find(
-        (c) => c.company_name.toLowerCase() === storedCompanyName.toLowerCase()
+        (c) => c && c.company_name && c.company_name.toLowerCase() === storedCompanyName.toLowerCase()
       );
       
       if (company) {
@@ -52,16 +52,18 @@ export const CompanyProvider: React.FC<{ children: ReactNode }> = ({ children })
       } else {
         // If stored company doesn't exist anymore, fall back to first company
         // and update localStorage
-        if (companiesList.length > 0) {
-          setSelectedCompanyState(companiesList[0]);
-          localStorage.setItem(getStorageKey(userId), companiesList[0].company_name);
+        const firstCompany = companiesList.find(c => c && c.company_name);
+        if (firstCompany) {
+          setSelectedCompanyState(firstCompany);
+          localStorage.setItem(getStorageKey(userId), firstCompany.company_name);
         }
       }
     } else {
       // No stored preference, select first company
-      if (companiesList.length > 0) {
-        setSelectedCompanyState(companiesList[0]);
-        localStorage.setItem(getStorageKey(userId), companiesList[0].company_name);
+      const firstCompany = companiesList.find(c => c && c.company_name);
+      if (firstCompany) {
+        setSelectedCompanyState(firstCompany);
+        localStorage.setItem(getStorageKey(userId), firstCompany.company_name);
       }
     }
   }, []);
